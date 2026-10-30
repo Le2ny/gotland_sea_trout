@@ -13,7 +13,8 @@ function setup(){
   c.officialCurrentWmtsLayer=()=>({addTo(){}});c.drawScalarBands=(samples,layer)=>{layer.drawn=samples[0].value};c.drawStaticVectors=(samples,layer)=>{layer.drawn=samples[0].value};
   for(const name of ['currentColor','windColor','tempColor','levelColor','waveColor'])c[name]=()=>'';
   vm.createContext(c);
-  vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith('const CURRENT_SOLID_STYLE=')),c);
+  for(const prefix of ['const CURRENT_SOLID_STYLE=','const CURRENT_VECTOR_STYLE='])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith(prefix)),c);
+  c.copernicusTime=d=>d.toISOString().replace('.000Z','Z');
   for(const name of ['readStored','storedPoint','requestGuard','invalidateRequest','timelineTime','hourlyIndex','rankingHour','openSheet','closeSheet','snapOneSpot','loadCoastMask','loadParkingNear','loadVectors','loadTemp','loadSeaLevel','loadWave','refreshConditionStrip','setLayer','today','fetchWindSamples','fetchTempSamples','fetchSeaLevelSamples','fetchWaveSamples','fetchCurrentSamples','uvFrom']){
     const line=source.split(/\r?\n/).find(l=>l.startsWith('function '+name+'(')||l.startsWith('async function '+name+'('));if(line)vm.runInContext(line,c);
   }
@@ -53,7 +54,7 @@ test('condition strip ignores older responses arriving after the latest response
 });
 const layers=[['loadTemp','fetchTempSamples','tempLayer','temp'],['loadSeaLevel','fetchSeaLevelSamples','seaLevelLayer','level'],['loadWave','fetchWaveSamples','waveLayer','wave'],['loadVectors','fetchWindSamples','windLayer','wind'],['loadVectors','fetchCurrentSamples','currentLayer','current']];
 test('late weather/current layer responses never redraw over a newer request',async()=>{
-  for(const [load,fetch,layer,key] of layers){const {c}=setup(),a=deferred(),b=deferred();let calls=0;c[fetch]=()=>calls++?b.promise:a.promise;const first=c[load](key),second=c[load](key);b.resolve([{value:12}]);await second;a.resolve([{value:1}]);await first;assert.equal(c[layer].drawn,12,key)}
+  for(const [load,fetch,layer,key] of layers){const {c}=setup(),a=deferred(),b=deferred();let calls=0;c[fetch]=()=>calls++?b.promise:a.promise;const first=c[load](key),second=c[load](key);b.resolve([{value:12}]);await second;a.resolve([{value:1}]);await first;assert.equal(c[layer].drawn,key==='current'?null:12,key)}
 });
 test('disabled layers ignore late successes and errors',async()=>{
   for(const [load,fetch,layer,key] of layers)for(const fail of [false,true]){const {c,statuses}=setup(),pending=deferred();c[fetch]=()=>pending.promise;const request=c[load](key);c.setLayer(key,false);const statusCount=statuses.length;
@@ -295,17 +296,20 @@ function currentRenderSetup(){
  c.fetchCurrentSamples=()=>pending.promise;c.drawScalarBands=(...args)=>bands.push(args);c.drawStaticVectors=(...args)=>arrows.push(args);
  return {...h,tiles,bands,arrows,pending};
 }
-test('current rendering retains official solid WMTS and numeric vectors/context without numeric color bands',async()=>{
- const h=currentRenderSetup(),{c}=h,samples=[{lat:57,lon:18,u:.3,n:.4,v:.5,dir:36.86989764584402}];const before=JSON.stringify(samples),run=c.loadVectors('current');
- assert.equal(c.currentLayer.items.length,1);assert.match(new URL(h.tiles[0].url).searchParams.get('STYLE'),/solidAndVector/);
- h.pending.resolve(samples);await run;
- assert.equal(h.bands.length,0);assert.equal(c.currentLayer.items.length,1);const q=new URL(c.currentLayer.items[0].url).searchParams;
- assert.equal(q.get('request'),'GetTile');assert.equal(q.get('STYLE'),'vectorStyle:solid,cmap:viridis,range=0/0.7');assert.equal(q.get('time'),'2026-09-15T12:00:00Z');assert.equal(q.get('layer'),new URL(h.tiles[0].url).searchParams.get('layer'));
- assert.equal(h.arrows.length,1);assert.strictEqual(h.arrows[0][0],samples);assert.equal(JSON.stringify(samples),before);assert.equal(c.currentContext({lat:57,lon:18},samples).v,.5);assert.match(h.statuses.at(-1),/1 numerische CMEMS-Punkte/);
+test('current rendering keeps two stable official layers and numeric context after success or failure',async()=>{
+ for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,samples=[{lat:57,lon:18,u:.3,n:.4,v:.5,dir:37}],before=JSON.stringify(samples),run=c.loadVectors('current');
+ assert.equal(c.currentLayer.items.length,2);const [surface,vectors]=c.currentLayer.items,q=new URL(surface.url).searchParams,vq=new URL(vectors.url).searchParams;
+ assert.equal(q.get('STYLE'),'vectorStyle:solid,cmap:speed,range:0/0.7');assert.equal(vq.get('STYLE'),'vectorStyle:vector,cmap:speed,range:0/0.7');assert.equal(q.get('time'),'2026-09-15T12:00:00Z');assert.equal(vq.get('time'),q.get('time'));assert.equal(vq.get('layer'),q.get('layer'));
+ assert.equal(surface.options.pane,'seaDataPane');assert.equal(vectors.options.pane,'currentVectorPane');assert.ok(surface.options.opacity<vectors.options.opacity);
+ if(fail)h.pending.reject(Error('missing'));else h.pending.resolve(samples);await run;
+ assert.equal(h.tiles.length,2);assert.strictEqual(c.currentLayer.items[0],surface);assert.strictEqual(c.currentLayer.items[1],vectors);assert.equal(h.bands.length,0);assert.equal(h.arrows.length,0);assert.equal(JSON.stringify(samples),before);assert.equal(c.currentContext({lat:57,lon:18},samples).v,.5);assert.match(h.statuses.at(-1),fail?/WMTS-Fallback/:/1 numerische CMEMS-Punkte/);
+ }
 });
-test('current rendering failure retains original WMTS fallback without numeric bands or arrows',async()=>{
- const h=currentRenderSetup(),run=h.c.loadVectors('current'),tile=h.c.currentLayer.items[0];h.pending.reject(Error('missing'));await run;
- assert.strictEqual(h.c.currentLayer.items[0],tile);assert.equal(h.c.currentLayer.items.length,1);assert.equal(h.bands.length,0);assert.equal(h.arrows.length,0);assert.match(h.statuses.at(-1),/WMTS-Fallback/);
+test('old numeric current responses cannot replace current WMTS layers or status',async()=>{
+ for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,old=deferred(),fresh=deferred();let calls=0;c.fetchCurrentSamples=()=>calls++?fresh.promise:old.promise;
+ const first=c.loadVectors('current');c.roundedCurrentTime=()=>new Date('2026-09-15T13:00Z');const second=c.loadVectors('current');fresh.resolve([{v:.5}]);await second;const layers=c.currentLayer.items.slice(),status=h.statuses.at(-1),count=h.tiles.length;
+ if(fail)old.reject(Error('old'));else old.resolve([{v:.1}]);await first;assert.deepEqual(c.currentLayer.items,layers);assert.equal(h.tiles.length,count);assert.equal(h.statuses.at(-1),status);assert.equal(h.arrows.length,0);for(const tile of layers)assert.equal(new URL(tile.url).searchParams.get('time'),'2026-09-15T13:00:00Z');
+ }
 });
 test('temperature and wind retain their existing numeric scalar rendering',async()=>{
  const h=currentRenderSetup(),samples=[{value:12,v:12}];h.c.fetchTempSamples=async()=>samples;h.c.fetchWindSamples=async()=>samples;
