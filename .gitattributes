@@ -1,0 +1,11 @@
+# Release checksums describe exactly these LF bytes locally and on GitHub Pages.
+index.html text eol=lf
+app.js text eol=lf
+styles.css text eol=lf
+current-field.js text eol=lf
+current-field-worker.js text eol=lf
+release.js text eol=lf
+sw.js text eol=lf
+manifest.webmanifest text eol=lf
+icon.svg text eol=lf
+data/gotland-coast-mask.json text eol=lf

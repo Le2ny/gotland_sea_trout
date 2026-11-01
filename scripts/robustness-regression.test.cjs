@@ -8,9 +8,9 @@ function setup(){
   const elements={},callbacks={},statuses=[];
   const element=id=>elements[id]??={innerHTML:'',textContent:'unchanged',classList:{items:new Set(),add(k){this.items.add(k)},remove(k){this.items.delete(k)},contains(k){return this.items.has(k)}},querySelectorAll:()=>[]};
   const c={rankingCurrentInFlight:new Map(),console:{warn(){}},Date,Map,Set,URL,requestVersions:{},weatherGeneration:0,timelineHours:[new Date('2026-09-15T12:00Z'),new Date('2026-09-15T13:00Z')],timelineIndex:0,active:{},document:{querySelector:element},$:element,status:s=>statuses.push(s),setTimeout:()=>1,clearTimeout(){},updateTimeline(){},updateLandCover(){},renderLegends(){},cancelModes(){},applySpotVisibility(){},satCenters:()=>[],favs:new Set(),customSpots:[],coastSegments:[],coastMaskPolys:[],coastMaskPromise:null,stitchCoastWays:()=>[],validLandRing:()=>true,live:async()=>({w:{current:{}},m:{current:{}}}),score:()=>50,compass:()=> 'N',exposure:()=> 'auflandig',currentKnots:()=>0,roundedCurrentTime:()=>new Date('2026-09-15T12:00Z')};
-  c.map={layers:new Set(),setView(){},getCenter:()=>({lat:57,lng:18}),hasLayer(l){return this.layers.has(l)},removeLayer(l){this.layers.delete(l)},on(name,fn){callbacks[name]=fn}};
+  c.map={getZoom:()=>9,layers:new Set(),setView(){},getCenter:()=>({lat:57,lng:18}),hasLayer(l){return this.layers.has(l)},removeLayer(l){this.layers.delete(l)},on(name,fn){callbacks[name]=fn}};
   for(const name of ['spotLayer','customLayer','homeLayer','protectedLayer','parkingLayer','bathy','windLayer','currentLayer','tempLayer','turbidityLayer','seaLevelLayer','waveLayer','shore50Layer'])c[name]={drawn:null,clearLayers(){this.drawn=null},addTo(map){map.layers.add(this)}};
-  c.officialCurrentWmtsLayer=()=>({addTo(){}});c.drawScalarBands=(samples,layer)=>{layer.drawn=samples[0].value};c.drawStaticVectors=(samples,layer)=>{layer.drawn=samples[0].value};
+  c.officialCurrentWmtsLayer=()=>({addTo(){}});c.drawMeasuredCurrents=()=>{};c.drawScalarBands=(samples,layer)=>{layer.drawn=samples[0].value};c.drawStaticVectors=(samples,layer)=>{layer.drawn=samples[0].value};
   for(const name of ['currentColor','windColor','tempColor','levelColor','waveColor'])c[name]=()=>'';
   vm.createContext(c);
   for(const prefix of ['const CURRENT_SOLID_STYLE=','const CURRENT_VECTOR_STYLE='])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith(prefix)),c);
@@ -52,7 +52,7 @@ test('condition strip ignores older responses arriving after the latest response
   const first=c.refreshConditionStrip(),second=c.refreshConditionStrip();const data=value=>({m:{hourly:{time:c.timelineHours.map(t=>+t/1000),sea_surface_temperature:[value,value]}}});
   b.resolve(data(12));await second;a.resolve(data(1));await first;assert.equal(element('#stripTemp').textContent,'12.0°');
 });
-const layers=[['loadTemp','fetchTempSamples','tempLayer','temp'],['loadSeaLevel','fetchSeaLevelSamples','seaLevelLayer','level'],['loadWave','fetchWaveSamples','waveLayer','wave'],['loadVectors','fetchWindSamples','windLayer','wind'],['loadVectors','fetchCurrentSamples','currentLayer','current']];
+const layers=[['loadTemp','fetchTempSamples','tempLayer','temp'],['loadSeaLevel','fetchSeaLevelSamples','seaLevelLayer','level'],['loadWave','fetchWaveSamples','waveLayer','wave'],['loadVectors','fetchWindSamples','windLayer','wind'],['loadVectors','drawCurrentField','currentLayer','current']];
 test('late weather/current layer responses never redraw over a newer request',async()=>{
   for(const [load,fetch,layer,key] of layers){const {c}=setup(),a=deferred(),b=deferred();let calls=0;c[fetch]=()=>calls++?b.promise:a.promise;const first=c[load](key),second=c[load](key);b.resolve([{value:12}]);await second;a.resolve([{value:1}]);await first;assert.equal(c[layer].drawn,key==='current'?null:12,key)}
 });
@@ -293,23 +293,14 @@ function currentRenderSetup(){
  c.L={tileLayer:(url,options)=>({url,options,addTo(layer){layer.items.push(this);tiles.push(this);return this}})};
  for(const prefix of ['const CURRENT_LAYER=','const WMTS_ROOT=','const CURRENT_WMTS_STYLE='])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith(prefix)),c);
  for(const name of ['officialCurrentWmtsLayer','copernicusTime','currentContext','idwVector','vdFrom'])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith('function '+name+'(')),c);
- c.fetchCurrentSamples=()=>pending.promise;c.drawScalarBands=(...args)=>bands.push(args);c.drawStaticVectors=(...args)=>arrows.push(args);
+ c.cancelCurrentField=()=>{};c.drawCurrentField=async(time,isCurrent)=>{const result=await pending.promise;if(isCurrent()){arrows.push({time});c.currentLayer.items.push({time})}return result};c.drawMeasuredCurrents=(...args)=>arrows.push(args);c.drawScalarBands=(...args)=>bands.push(args);c.drawStaticVectors=(...args)=>arrows.push(args);
  return {...h,tiles,bands,arrows,pending};
 }
-test('current rendering keeps two stable official layers and numeric context after success or failure',async()=>{
- for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,samples=[{lat:57,lon:18,u:.3,n:.4,v:.5,dir:37}],before=JSON.stringify(samples),run=c.loadVectors('current');
- assert.equal(c.currentLayer.items.length,2);const [surface,vectors]=c.currentLayer.items,q=new URL(surface.url).searchParams,vq=new URL(vectors.url).searchParams;
- assert.equal(q.get('STYLE'),'vectorStyle:solid,cmap:speed,range:0/0.7');assert.equal(vq.get('STYLE'),'vectorStyle:vector,cmap:speed,range:0/0.7');assert.equal(q.get('time'),'2026-09-15T12:00:00Z');assert.equal(vq.get('time'),q.get('time'));assert.equal(vq.get('layer'),q.get('layer'));
- assert.equal(surface.options.pane,'seaDataPane');assert.equal(vectors.options.pane,'currentVectorPane');assert.ok(surface.options.opacity<vectors.options.opacity);
- if(fail)h.pending.reject(Error('missing'));else h.pending.resolve(samples);await run;
- assert.equal(h.tiles.length,2);assert.strictEqual(c.currentLayer.items[0],surface);assert.strictEqual(c.currentLayer.items[1],vectors);assert.equal(h.bands.length,0);assert.equal(h.arrows.length,0);assert.equal(JSON.stringify(samples),before);assert.equal(c.currentContext({lat:57,lon:18},samples).v,.5);assert.match(h.statuses.at(-1),fail?/WMTS-Fallback/:/1 numerische CMEMS-Punkte/);
- }
+test('current rendering uses only the Zarr field and fails closed without WMTS or legacy interpolation',async()=>{
+ for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,run=c.loadVectors('current');assert.equal(c.currentLayer.items.length,0);if(fail)h.pending.reject(Error('missing mask'));else h.pending.resolve({arrows:10,dots:2});await run;assert.equal(h.tiles.length,0);assert.equal(h.bands.length,0);assert.equal(h.arrows.length,fail?0:1);assert.match(h.statuses.at(-1),fail?/nicht verfügbar/:/10 Pfeile/)}
 });
-test('old numeric current responses cannot replace current WMTS layers or status',async()=>{
- for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,old=deferred(),fresh=deferred();let calls=0;c.fetchCurrentSamples=()=>calls++?fresh.promise:old.promise;
- const first=c.loadVectors('current');c.roundedCurrentTime=()=>new Date('2026-09-15T13:00Z');const second=c.loadVectors('current');fresh.resolve([{v:.5}]);await second;const layers=c.currentLayer.items.slice(),status=h.statuses.at(-1),count=h.tiles.length;
- if(fail)old.reject(Error('old'));else old.resolve([{v:.1}]);await first;assert.deepEqual(c.currentLayer.items,layers);assert.equal(h.tiles.length,count);assert.equal(h.statuses.at(-1),status);assert.equal(h.arrows.length,0);for(const tile of layers)assert.equal(new URL(tile.url).searchParams.get('time'),'2026-09-15T13:00:00Z');
- }
+test('old current-field responses cannot replace newer layers or status',async()=>{
+ for(const fail of [false,true]){const h=currentRenderSetup(),{c}=h,old=deferred(),fresh=deferred();let calls=0;c.drawCurrentField=async(time,guard)=>{const result=await(calls++?fresh.promise:old.promise);if(guard())c.currentLayer.items.push({time});return result};const first=c.loadVectors('current');c.roundedCurrentTime=()=>new Date('2026-09-15T13:00Z');const second=c.loadVectors('current');fresh.resolve({arrows:10,dots:0});await second;const items=c.currentLayer.items.slice(),status=h.statuses.at(-1);if(fail)old.reject(Error('old'));else old.resolve({arrows:1,dots:0});await first;assert.deepEqual(c.currentLayer.items,items);assert.equal(h.statuses.at(-1),status);assert.equal(items[0].time,'2026-09-15T13:00:00Z')}
 });
 test('temperature and wind retain their existing numeric scalar rendering',async()=>{
  const h=currentRenderSetup(),samples=[{value:12,v:12}];h.c.fetchTempSamples=async()=>samples;h.c.fetchWindSamples=async()=>samples;
@@ -321,7 +312,63 @@ test('current legend follows the visible official WMTS style through loading, su
  const h=currentRenderSetup(),{c}=h;c.currentLayer.getLayers=()=>c.currentLayer.items;c.syncQuickLayers=()=>{};
  for(const name of ['wmtsLegendUrl','currentLegendUrl'])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith('function '+name+'(')),c);
  vm.runInContext(source.slice(source.indexOf('function renderLegends(){'),source.indexOf('function syncQuickLayers(){')),c);
- const check=()=>{const html=h.element('#mapLegends').innerHTML,src=html.match(/src="([^"]+)"/)[1],q=new URL(src).searchParams,tile=new URL(c.currentLayer.items[0].url).searchParams;assert.equal(q.get('request'),'GetLegend');assert.equal(q.get('STYLE'),tile.get('STYLE'));assert.equal(q.get('layer'),tile.get('layer'));assert.ok(html.includes('m/s'));assert.doesNotMatch(html,/currentScaleBar|currentScaleTicks|0,7\+/)};
+ const check=()=>{const html=h.element('#mapLegends').innerHTML,src=html.match(/src="([^"]+)"/)[1],q=new URL(src).searchParams;assert.equal(q.get('request'),'GetLegend');assert.equal(q.get('STYLE'),'vectorStyle:solid,cmap:rainbow,range:0/0.7');assert.ok(q.get('layer').includes('PT15M-i_202411'));assert.ok(html.includes('0,01'));assert.ok(html.includes('m/s'));assert.doesNotMatch(html,/currentScaleBar|currentScaleTicks|0,7\+/)};
  const run=c.loadVectors('current');check();if(fail)h.pending.reject(Error('missing'));else h.pending.resolve([{u:.3,n:.4,v:.5,lat:57,lon:18,dir:37}]);await run;check();
  }
+});
+
+function measuredSetup(){
+ const c={Date,Map,Set,Math,Number,JSON,AbortController,setTimeout,clearTimeout,console:{warn(){}},isLandCoast:()=>false};vm.createContext(c);
+ vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith('const currentPointCache=')),c);
+ for(const name of ['vdFrom','wmtsPixelFor','visibleCurrentQueries','officialMapPoint','limitedCurrentPoint','fetchVisibleCurrentPoints','measuredCurrentIcon','drawMeasuredCurrents'])vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith('function '+name+'(')||l.startsWith('async function '+name+'(')),c);
+ c.currentFeatureUrl=(lat,lon,time)=>JSON.stringify({lat,lon,time});return c;
+}
+function pointPayload(lat=57,lon=18,u=.3,n=.4){return {features:[{properties:{lat,lon,variableId:'sea_water_velocity',component1VariableId:'uo',component2VariableId:'vo',component1Units:'m s-1',component2Units:'m s-1',component1Value:u,component2Value:n,value:Math.hypot(u,n)}}]}}
+test('measured currents accept only official finite paired m/s data and preserve source coordinates',()=>{
+ const c=measuredSetup(),time='2026-10-31T12:00:00Z';const point=c.officialMapPoint(pointPayload(),time);assert.equal(point.lat,57);assert.equal(point.lon,18);assert.equal(point.v,.5);assert.equal(point.time,time);
+ for(const value of [null,NaN,Infinity,'0.3']){let d=pointPayload();d.features[0].properties.component1Value=value;assert.equal(c.officialMapPoint(d,time),null)}
+ for(const change of [{component2VariableId:'other'},{component1Units:'kn'},{value:null},{value:4},{time:'2026-10-31T13:00:00Z'}]){let d=pointPayload();Object.assign(d.features[0].properties,change);assert.equal(c.officialMapPoint(d,time),null)}
+ assert.equal(c.officialMapPoint({features:[]},time),null);assert.equal(c.officialMapPoint(pointPayload(57,18,0,0),time).v,0);let swapped=pointPayload();Object.assign(swapped.features[0].properties,{component1VariableId:'vo',component2VariableId:'uo',component1Value:.4,component2Value:.3});assert.equal(c.officialMapPoint(swapped,time).u,.3);assert.equal(c.officialMapPoint(swapped,time).n,.4);
+});
+test('measured SVGs remain black, exact zero is a dot and nonzero directions use official components',()=>{
+ const c=measuredSetup();c.L={divIcon:options=>options};for(const [u,n,dir] of [[0,1,0],[1,0,90],[0,-1,180],[-1,0,270],[.000001,0,90]]){const p={u,n,...c.vdFrom(u,n)},icon=c.measuredCurrentIcon(p);assert.match(icon.html,/<svg/);assert.match(icon.html,/stroke="black"/);assert.ok(icon.html.includes('rotate('+dir+' 14 14)'));assert.doesNotMatch(icon.html,/<circle/)}assert.match(c.measuredCurrentIcon({v:0,dir:0}).html,/<circle/);
+});
+test('measured markers use only exact current model positions, not land, stale time or interpolated positions',()=>{
+ const c=measuredSetup(),time='2026-10-31T12:00:00Z',markers=[];c.map={getBounds:()=>({contains:p=>p[0]<59})};c.isLandCoast=lat=>lat===58;c.L={divIcon:o=>o,marker:(point,options)=>({addTo(){markers.push({point,options})}})};
+ const a=c.officialMapPoint(pointPayload(),time);c.drawMeasuredCurrents([a,{...a,lat:58},{...a,lat:60},{...a,time:'old'},{...a,u:NaN}],{},time);assert.equal(markers.length,1);assert.deepEqual(Array.from(markers[0].point),[57,18]);assert.equal(markers[0].options.pane,'currentVectorPane');
+});
+
+test('map queries are capped, do not increase in density with zoom and skip land',()=>{
+ const c=measuredSetup();let zoom=12;c.map={getZoom:()=>zoom,getBounds:()=>({getNorth:()=>58,getSouth:()=>57,getWest:()=>18,getEast:()=>19}),project:([lat,lon])=>({x:lon*1000,y:-lat*1000}),unproject:([x,y])=>({lat:-y/1000,lng:x/1000})};const a=c.visibleCurrentQueries();zoom=16;assert.equal(JSON.stringify(c.visibleCurrentQueries()),JSON.stringify(a));assert.ok(a.length>0&&a.length<=96);c.isLandCoast=()=>true;assert.equal(c.visibleCurrentQueries().length,0);
+});
+test('point fetch shares in-flight and completed cache, separates time and retries HTTP/JSON failures',async()=>{
+ const c=measuredSetup(),gate=deferred(),p={lat:57,lon:18},time='2026-10-31T12:00:00Z';let calls=0;c.fetch=async()=>{calls++;await gate.promise;return{ok:true,json:async()=>pointPayload()}};const a=c.limitedCurrentPoint(p,time,()=>true),b=c.limitedCurrentPoint(p,time,()=>true);gate.resolve();assert.strictEqual(await a,await b);assert.equal(calls,1);await c.limitedCurrentPoint(p,time,()=>true);assert.equal(calls,1);await c.limitedCurrentPoint(p,'2026-10-31T13:00:00Z',()=>true);assert.equal(calls,2);
+ for(const bad of [async()=>({ok:false,status:503}),async()=>({ok:true,json:async()=>{throw Error('JSON')}})]){const t='error-'+calls++;c.fetch=bad;await assert.rejects(c.limitedCurrentPoint(p,t,()=>true));c.fetch=async()=>({ok:true,json:async()=>pointPayload()});assert.ok(await c.limitedCurrentPoint(p,t,()=>true))}
+});
+test('map fetch global concurrency is six and stale work does not start remaining queued points',async()=>{
+ const c=measuredSetup(),gates=[];let active=0,peak=0,valid=true;c.fetch=async url=>{active++;peak=Math.max(peak,active);const gate=deferred();gates.push(gate);await gate.promise;active--;let p=JSON.parse(url);return{ok:true,json:async()=>pointPayload(p.lat,p.lon)}};
+ const jobs=Array.from({length:12},(_,i)=>c.limitedCurrentPoint({lat:57+i/100,lon:18},'2026-10-31T12:00:00Z',()=>valid));assert.equal(gates.length,6);valid=false;gates.forEach(g=>g.resolve());await Promise.all(jobs);assert.equal(gates.length,6);assert.equal(peak,6);
+});
+test('map point timeouts reject cleanly and a subsequent attempt succeeds',async()=>{
+ const c=measuredSetup();let timeout;c.setTimeout=(fn,ms)=>{assert.equal(ms,10000);timeout=fn;return 1};c.clearTimeout=()=>{};c.fetch=(_url,{signal})=>new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(Error('aborted'))));const p={lat:57,lon:18},request=c.limitedCurrentPoint(p,'time',()=>true);timeout();await assert.rejects(request,/aborted/);c.fetch=async()=>({ok:true,json:async()=>pointPayload()});assert.ok(await c.limitedCurrentPoint(p,'time',()=>true));
+});
+test('map coverage does not fabricate missing points and deduplicates returned model cells',async()=>{
+ const c=measuredSetup(),time='2026-10-31T12:00:00Z';c.visibleCurrentQueries=()=>Array.from({length:6},(_,i)=>({lat:57+i/100,lon:18}));let i=0;c.limitedCurrentPoint=async()=>{const n=i++;if(n===0)throw Error('offline');if(n===1)return null;return c.officialMapPoint(pointPayload(),time)};const points=await c.fetchVisibleCurrentPoints(time,()=>true);assert.equal(points.length,1);assert.equal(points.failed,1);assert.equal(points[0].lat,57);c.limitedCurrentPoint=async()=>{throw Error('offline')};await assert.rejects(c.fetchVisibleCurrentPoints(time,()=>true));
+});
+
+
+test('a newer same-key map request retries a stale queued request instead of inheriting its cancellation',async()=>{
+ const c=measuredSetup(),gates=[];let valid=true;c.fetch=async()=>{const gate=deferred();gates.push(gate);await gate.promise;return{ok:true,json:async()=>pointPayload()}};
+ const first=Array.from({length:6},(_,i)=>c.limitedCurrentPoint({lat:57+i/100,lon:18},'t',()=>valid));const p={lat:58,lon:18},stale=c.limitedCurrentPoint(p,'t',()=>valid);valid=false;const fresh=c.limitedCurrentPoint(p,'t',()=>true);gates.slice().forEach(g=>g.resolve());await Promise.all(first);await stale;await new Promise(setImmediate);assert.equal(gates.length,7);gates[6].resolve();assert.ok(await fresh);
+});
+
+
+
+test('Zarr current field remains enabled at zoom10,12,14,16 without raster tiles',async()=>{
+ for(const z of [10,12,14,16]){const h=currentRenderSetup();h.c.map.getZoom=()=>z;const run=h.c.loadVectors('current');h.pending.resolve({arrows:20,dots:1});await run;assert.equal(h.tiles.length,0);assert.equal(h.arrows.length,1);assert.equal(h.c.currentLayer.items.length,1)}
+});
+test('current field clears on movement, zoom and timeline; pending output stays invalid',async()=>{
+ const h=currentRenderSetup(),{c,callbacks}=h;c.active.current=true;c.refreshConditionStrip=()=>{};c.cancelCurrentField=()=>{};
+ vm.runInContext(source.split(/\r?\n/).find(l=>l.startsWith("map.on('movestart zoomstart'")),c);
+ for(const action of [()=>callbacks['movestart zoomstart'](),()=>callbacks['moveend zoomend'](),()=>c.refreshTimed()]){const gate=deferred();c.drawCurrentField=async(time,guard)=>{await gate.promise;if(guard())c.currentLayer.items.push({time});return{arrows:1,dots:0}};const run=c.loadVectors('current');c.currentLayer.items.push({old:true});action();assert.equal(c.currentLayer.items.length,0);gate.resolve();await run;assert.equal(c.currentLayer.items.length,0)}
 });
