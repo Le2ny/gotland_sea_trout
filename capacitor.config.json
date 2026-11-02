@@ -1,0 +1,6 @@
+{
+  "appId": "app.gotlandseatrout",
+  "appName": "Gotland Sea Trout",
+  "webDir": "www",
+  "android": { "allowMixedContent": false }
+}

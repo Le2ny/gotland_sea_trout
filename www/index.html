@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Gotland Sea Trout</title>
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <header id="top">
+    <div id="status">Lade gespeicherte Prognose …</div>
+    <button id="btnLoad" type="button">Prognose laden</button>
+  </header>
+
+  <div id="progress" hidden><div id="bar"></div><span id="progressText"></span></div>
+
+  <footer id="bottom">
+    <div class="row">
+      <button id="btnPlay" type="button" aria-label="Abspielen">▶</button>
+      <div id="timeLabel">–</div>
+      <div id="legend"><span>0</span><canvas id="legendBar" width="120" height="10"></canvas><span>0,7 m/s</span></div>
+    </div>
+    <input id="slider" type="range" min="0" max="72" value="0" step="1" disabled>
+  </footer>
+
+  <script src="lib/leaflet/leaflet.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
