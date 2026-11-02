@@ -85,17 +85,24 @@ async function pool(tasks, n, onDone) {
   }));
 }
 
-/** Downloads the next 72 h (hourly) of uo/vo for Gotland. onProgress(done,total,bytes). */
-export async function downloadForecast(onProgress = () => {}) {
-  let bytes = 0; const g = async (u, r) => { const b = await get(u, r); bytes += b.length; return b; };
+/** Model grid of the Gotland window (real coordinate arrays, not reconstructed). */
+export async function fetchGrid(g = get) {
   const meta = JSON.parse(new TextDecoder().decode(await g(BASE + '/.zmetadata'))).metadata;
-  const za = meta['uo/.zarray'], [, NLAT, NLON] = za.shape, CT = za.chunks[0];
+  const za = meta['uo/.zarray'], [, NLAT, NLON] = za.shape;
   if (za.dtype !== '<f4' || za.chunks[1] !== NLAT || za.chunks[2] !== NLON) throw new Error('Copernicus-Datenlayout hat sich geändert');
   const lat = new Float32Array(decodeFull(await g(BASE + '/latitude/0')).buffer, 0, NLAT);
   const lon = new Float32Array(decodeFull(await g(BASE + '/longitude/0')).buffer, 0, NLON);
-  let r0 = lat.findIndex(v => v >= BBOX.south), r1 = lat.findLastIndex(v => v <= BBOX.north);
-  let c0 = lon.findIndex(v => v >= BBOX.west), c1 = lon.findLastIndex(v => v <= BBOX.east);
-  const nr = r1 - r0 + 1, nc = c1 - c0 + 1;
+  const r0 = lat.findIndex(v => v >= BBOX.south), r1 = lat.findLastIndex(v => v <= BBOX.north);
+  const c0 = lon.findIndex(v => v >= BBOX.west), c1 = lon.findLastIndex(v => v <= BBOX.east);
+  return { meta, NLAT, NLON, r0, r1, c0, c1, nr: r1 - r0 + 1, nc: c1 - c0 + 1,
+    lat: Array.from(lat.subarray(r0, r1 + 1)), lon: Array.from(lon.subarray(c0, c1 + 1)) };
+}
+
+/** Downloads the next 72 h (hourly) of uo/vo for Gotland. onProgress(done,total,bytes). */
+export async function downloadForecast(onProgress = () => {}) {
+  let bytes = 0; const g = async (u, r) => { const b = await get(u, r); bytes += b.length; return b; };
+  const grid = await fetchGrid(g);
+  const { meta, NLAT, NLON, r0, r1, c0, nr, nc } = grid, CT = meta['uo/.zarray'].chunks[0];
 
   // time axis (days since 1900-01-01), regular 15 min steps
   const tz = meta['time/.zarray'], NT = tz.shape[0], TC = tz.chunks[0];
@@ -134,7 +141,6 @@ export async function downloadForecast(onProgress = () => {}) {
 
   return {
     version: 1, fetchedAt: Date.now(), modelLastTime: lastMs, times, nr, nc,
-    lat: Array.from(lat.subarray(r0, r1 + 1)), lon: Array.from(lon.subarray(c0, c1 + 1)),
-    u, v, bytes,
+    lat: grid.lat, lon: grid.lon, u, v, bytes,
   };
 }

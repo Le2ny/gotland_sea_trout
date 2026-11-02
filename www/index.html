@@ -21,10 +21,16 @@
     <div class="row">
       <button id="btnPlay" type="button" aria-label="Abspielen">▶</button>
       <div id="timeLabel">–</div>
-      <div id="legend"><span>0</span><canvas id="legendBar" width="120" height="10"></canvas><span>0,7 m/s</span></div>
+      <button id="btnSpots" type="button">Top-Spots</button>
     </div>
     <input id="slider" type="range" min="0" max="72" value="0" step="1" disabled>
+    <div id="legend"><span>Strömung 0</span><canvas id="legendBar" width="256" height="10"></canvas><span>0,7 m/s</span></div>
   </footer>
+
+  <section id="sheet" hidden>
+    <div id="sheetHead"><b id="sheetTitle"></b><button id="sheetClose" type="button" aria-label="Schließen">✕</button></div>
+    <div id="sheetBody"></div>
+  </section>
 
   <script src="lib/leaflet/leaflet.js"></script>
   <script type="module" src="js/main.js"></script>

@@ -1,6 +1,6 @@
 // Leaflet layer: colour field (official Copernicus rainbow 0–0.7 m/s, ~80 % opacity),
 // land cut out with the OSM coastline, black arrows (dots below 0.01 m/s).
-import { makeSampler } from './field.js';
+import { ringInBounds } from './basemap.js';
 
 const STEP = 3;          // colour sample every 3 CSS px, smoothed by the canvas
 const ARROW_GAP = 34;    // CSS px between arrows
@@ -22,9 +22,9 @@ export function createCurrentLayer(L, palette, coast) {
       this._canvas.remove();
       map.off('moveend zoomend resize', this.redraw, this);
     },
-    setData(forecast, hour) {
-      this._f = forecast; this._k = hour;
-      this._sample = forecast ? makeSampler(forecast) : null;
+    /** sampler: the same function the ranking and popups use (field.js makeSampler) */
+    setData(forecast, hour, sampler) {
+      this._f = forecast; this._k = hour; this._sample = sampler;
       if (this._map) this.redraw();
     },
     setHour(hour) { this._k = hour; if (this._map) this.redraw(); },
@@ -97,14 +97,4 @@ export function createCurrentLayer(L, palette, coast) {
       this.lastRenderMs = performance.now() - t0;
     },
   });
-}
-
-function ringInBounds(ring, b) {
-  if (!ring._bb) {
-    let s = 90, n = -90, w = 180, e = -180;
-    for (let i = 0; i < ring.length; i += 2) { const x = ring[i], y = ring[i + 1]; if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y; }
-    ring._bb = [s, w, n, e];
-  }
-  const [s, w, n, e] = ring._bb;
-  return !(n < b.getSouth() || s > b.getNorth() || e < b.getWest() || w > b.getEast());
 }
