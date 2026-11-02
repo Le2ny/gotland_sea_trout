@@ -48,7 +48,7 @@
     <div id="sheetBody"></div>
   </section>
 
-  <script>setTimeout(() => document.getElementById("intro")?.remove(), 6000);</script>
+  <script>setTimeout(() => { if (!window.__appReady) document.getElementById("intro")?.remove(); }, 8000);</script>
   <script src="lib/leaflet/leaflet.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

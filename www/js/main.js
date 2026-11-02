@@ -7,9 +7,9 @@ import { rankAll, bestTimes, exposure } from './ranking.js';
 import { coastIndex, computeBarriers } from './geo.js';
 import { fetchProtection, protectionAt, RULES_URL, HVMFS_URL, SEASON_NOTE } from './protection.js';
 import * as store from './store.js';
+import { initIntro, HOW_HTML } from './intro.js';
 
 const $ = id => document.getElementById(id);
-const introShownAt = performance.now();
 const H = 3600000;
 
 // Web version (iPhone/Android browser): service worker so the app itself starts offline.
@@ -66,7 +66,7 @@ window.__map = map; window.__field = field; // for tests
 
 // ---------------------------------------------------------------- state
 let ocean = null, weather = null, hour = 0, S = {}, ranking = [], protection = bundledProtection, customSpots = [], home = null, newer = null;
-let settings = { main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
+let settings = { sound: true, main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
 const allSpots = () => [...builtinSpots, ...customSpots];
 
 async function barriersFor(grid) {
@@ -402,13 +402,14 @@ $('btnMore').onclick = () => sheet('more', 'Mehr', `<div class="actions">
   <a href="${HVMFS_URL}" target="_blank" rel="noopener">§ Vorschrift HVMFS 2023:11 (PDF)</a>
   <button id="mExport">⇩ Eigene Spots sichern</button>
   <label class="fileBtn">⇧ Sicherung einlesen<input id="mImport" type="file" accept="application/json,.json" hidden></label>
-  <button id="mInfo">ⓘ Wann wird was geladen?</button>
+  <button id="mHow">ⓘ So funktioniert's</button>
+  <button id="mInfo">⏱ Wann wird was geladen?</button>
   <button id="mSources">© Quellen & Lizenzen</button></div>
   <p class="note">Schutzgebiete: ${SEASON_NOTE} Rechtlich maßgeblich ist die Vorschrift, nicht diese Karte.</p>`, null, () => {
   $('mAdd').onclick = () => setMode('add', 'Tippe auf die Karte, wo dein Spot liegt · hier tippen zum Abbrechen');
   $('mHome').onclick = () => setMode('home', 'Tippe auf die Position des Ferienhauses · hier tippen zum Abbrechen');
   $('mExport').onclick = exportBackup; $('mImport').onchange = importBackup;
-  $('mInfo').onclick = openInfo; $('mSources').onclick = openSources;
+  $('mInfo').onclick = openInfo; $('mSources').onclick = openSources; $('mHow').onclick = openHow;
 });
 
 async function exportBackup() {
@@ -449,6 +450,7 @@ function openInfo() {
   <p><b>Empfehlung:</b> morgens im WLAN laden (frischer Nachtlauf), bei Bedarf abends noch einmal. Die App prüft beim Start mit wenigen Bytes, ob Copernicus einen neueren Lauf hat, und zeigt das oben an. Älter als 24 h wird markiert, nach 72 h ist die Prognose abgelaufen.</p>
   ${ocean ? `<p class="note">Datensatz: ${esc(ocean.datasets?.cur)}${ocean.datasets?.retires ? ` (wird bei Copernicus am ${new Date(ocean.datasets.retires).toLocaleDateString('de-DE')} abgeschaltet – die App wechselt dann automatisch auf die neue Version)` : ''}</p>` : ''}`);
 }
+function openHow() { sheet('how', "So funktioniert's", HOW_HTML); }
 function openSources() {
   sheet('sources', 'Quellen & Lizenzen', `<ul class="src">
   <li><b>Strömung, Wasserstand, Wassertemperatur:</b> E.U. Copernicus Marine Service, BALTICSEA_ANALYSISFORECAST_PHY_003_006</li>
@@ -508,4 +510,9 @@ try {
   if (o?.version === 2 && navigator.onLine) newerRunAvailable(o.fetchedAt).then(n => { newer = n; updateStatus(); });
 } catch (e) { $('status').textContent = 'Fehler beim Start: ' + e.message; console.error(e); }
 setInterval(() => ocean && updateStatus(), 60000);
-setTimeout(() => { $('intro').classList.add('gone'); setTimeout(() => $('intro').remove(), 700); }, Math.max(0, 1400 - (performance.now() - introShownAt)));
+initIntro({
+  coast, fishSvg: await fetch('icon.svg').then(r => r.text()).catch(() => '🐟'),
+  getTopTwo: () => ranking.slice(0, 2).map(r => ({ id: r.spot.id, name: r.spot.name, score: r.score })),
+  openSpot: id => { const s = allSpots().find(x => String(x.id) === String(id)); if (s) { map.setView([s.lat, s.lon], 13); openSpot(id); } },
+  showHow: openHow, soundOn: () => settings.sound !== false, setSound: on => { settings.sound = on; store.save('settings', settings).catch(() => {}); },
+});
