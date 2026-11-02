@@ -8,6 +8,11 @@ import * as store from './store.js';
 
 const $ = id => document.getElementById(id);
 const introShownAt = performance.now();
+
+// Web version (iPhone/Android browser): service worker so the app itself starts offline.
+// Not needed inside the Android APK, where all files are bundled.
+if ('serviceWorker' in navigator && !window.Capacitor?.isNativePlatform?.() && (location.protocol === 'https:' || location.hostname === 'localhost'))
+  navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service Worker:', e.message));
 const fmtTime = ms => new Date(ms).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const fmtNum = (x, d = 2) => x.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);

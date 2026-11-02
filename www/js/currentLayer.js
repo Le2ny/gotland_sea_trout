@@ -52,7 +52,7 @@ export function createCurrentLayer(L, palette, coast) {
         const ci = Math.min(255, Math.max(0, Math.round(s / palette.max * 255))) * 3, p = (y * w + x) * 4;
         img.data[p] = lut[ci]; img.data[p + 1] = lut[ci + 1]; img.data[p + 2] = lut[ci + 2]; img.data[p + 3] = 204;
       }
-      const off = new OffscreenCanvas(w, h); off.getContext('2d').putImageData(img, 0, 0);
+      const off = document.createElement('canvas'); off.width = w; off.height = h; off.getContext('2d').putImageData(img, 0, 0);  // no OffscreenCanvas: iOS < 16.4
       ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
       // pixel (x,y) of the small image is the sample at screen point (x*STEP, y*STEP)
       ctx.drawImage(off, -STEP / 2 * dpr, -STEP / 2 * dpr, w * STEP * dpr, h * STEP * dpr);
