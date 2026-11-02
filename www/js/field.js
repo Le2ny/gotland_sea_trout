@@ -1,82 +1,87 @@
-// Sampling the model grid, following the rules of the original app (v6.2.4):
-// - all valid model points within 1.5 grid spacings contribute, with positive,
-//   distance-dependent weights (modified Shepard: w = ((R-d)/(R·d))², exact at model points,
+// Sampling gridded data, following the rules of the original app (v6.2.4):
+// - all valid grid points within 1.5 grid spacings contribute, with positive,
+//   distance-dependent weights (modified Shepard: w = ((R-d)/(R·d))², exact at grid points,
 //   smoothly falling to 0 at the radius)
-// - NoData (-999) is never treated as zero current
-// - model points on land and points whose connecting line crosses the OSM coastline are not used
-//   (precomputed in data/barriers.json by tools/build_barriers.mjs)
-// - at least 2 usable model points are required, otherwise: no value
-// - u and v are interpolated separately, speed/direction are derived afterwards
-import { NODATA } from './copernicus.js';
-
+// - NoData (-999 / NaN) is never treated as zero
+// - with barriers: grid points on land and points whose connecting line crosses the OSM
+//   coastline are not used (see geo.js computeBarriers)
+// - at least 2 usable grid points are required, otherwise: no value
+// - every component (e.g. u and v) is interpolated separately; speed/direction come afterwards
+export const NODATA = -999;
 const R = 1.5, R2 = R * R;
 
-function decodeBarriers(b, f) {
-  if (!b) return null;
+export const gridKey = g => `${g.nr}x${g.nc}:${g.lat[0].toFixed(5)},${g.lon[0].toFixed(5)}:${g.lat.at(-1).toFixed(5)},${g.lon.at(-1).toFixed(5)}`;
+
+export function barriersMatch(b, grid) {
   const same = (x, y) => Math.abs(x - y) < 1e-5;
-  if (b.version !== 2 || b.nr !== f.nr || b.nc !== f.nc || !same(b.lat0, f.lat[0]) || !same(b.lon0, f.lon[0]) || !same(b.latN, f.lat.at(-1)) || !same(b.lonN, f.lon.at(-1))) {
-    console.warn('barriers.json passt nicht zum Modellgitter – Küstenbarrieren deaktiviert');
-    return null;
-  }
-  const cells = new Array((b.nr - 1) * (b.nc - 1)).fill(null);
-  const LAND = new Uint16Array(b.S * b.S);  // all zero = nothing allowed
-  for (const [k, v] of Object.entries(b.cells)) {
-    if (v === 'L') { cells[+k] = LAND; continue; }
-    const bytes = Uint8Array.from(atob(v), ch => ch.charCodeAt(0));
-    cells[+k] = new Uint16Array(bytes.buffer);
-  }
-  const land = Uint8Array.from(atob(b.landCorners), ch => ch.charCodeAt(0));
-  return { S: b.S, cells, land };
+  return !!b && b.version === 2 && b.nr === grid.nr && b.nc === grid.nc && same(b.lat0, grid.lat[0]) && same(b.lon0, grid.lon[0])
+    && same(b.latN, grid.lat.at(-1)) && same(b.lonN, grid.lon.at(-1));
 }
 
-export function makeSampler(f, barriersJson) {
-  // locate cells with the real coordinate arrays (the grid is not perfectly regular in float32)
-  const LAT = Float64Array.from(f.lat), LON = Float64Array.from(f.lon);
-  const locate = (a, x) => {  // fractional index, or -1 outside
+function decodeBarriers(b, grid) {
+  if (!barriersMatch(b, grid)) return null;
+  const dec = s => Uint8Array.from(atob(s), ch => ch.charCodeAt(0));
+  const cells = new Array((b.nr - 1) * (b.nc - 1)).fill(null);
+  const LAND = new Uint16Array(b.S * b.S);
+  for (const [k, v] of Object.entries(b.cells)) cells[+k] = v === 'L' ? LAND : new Uint16Array(dec(v).buffer);
+  return { S: b.S, cells, land: dec(b.landCorners) };
+}
+
+/**
+ * grid: {nr, nc, lat[], lon[]}; arrays: [Float32Array] with layout [step][row][col];
+ * barriers: barriers.json for this grid or null.
+ * Returns sample(step, lat, lon, out) → true and out[i] = component i, or false.
+ */
+export function makeSampler(grid, arrays, barriers) {
+  const LAT = Float64Array.from(grid.lat), LON = Float64Array.from(grid.lon), nr = grid.nr, nc = grid.nc;
+  const locate = (a, x) => {  // fractional index (real coordinate arrays), or -1 outside
     const n = a.length;
     if (!(x >= a[0] && x <= a[n - 1])) return -1;
     let lo = 0, hi = n - 1;
     while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (a[mid] <= x) lo = mid; else hi = mid; }
     return lo + (x - a[lo]) / (a[lo + 1] - a[lo]);
   };
-  const plane = f.nr * f.nc, bar = decodeBarriers(barriersJson, f);
+  const plane = nr * nc, bar = decodeBarriers(barriers, grid), m = arrays.length;
+  const acc = new Float64Array(m);
+  const valid = x => x !== NODATA && x === x;
 
-  /** writes [u, v] into out and returns true, or returns false when there is no supported value */
   function sample(k, lat, lon, out) {
     const fr = locate(LAT, lat), fc = locate(LON, lon);
     if (fr < 0 || fc < 0) return false;
-    const r = Math.min(Math.floor(fr), f.nr - 2), c = Math.min(Math.floor(fc), f.nc - 2);
+    const r = Math.min(Math.floor(fr), nr - 2), c = Math.min(Math.floor(fc), nc - 2);
     let allowed = 0xffff;
     if (bar) {
-      const m = bar.cells[r * (f.nc - 1) + c];
-      if (m) { const S = bar.S; allowed = m[Math.min(S - 1, Math.floor((fr - r) * S)) * S + Math.min(S - 1, Math.floor((fc - c) * S))]; }
+      const cell = bar.cells[r * (nc - 1) + c];
+      if (cell) { const S = bar.S; allowed = cell[Math.min(S - 1, Math.floor((fr - r) * S)) * S + Math.min(S - 1, Math.floor((fc - c) * S))]; }
     }
     const base = k * plane;
-    let su = 0, sv = 0, sw = 0, n = 0, exact = -1;
+    let sw = 0, n = 0, exact = -1; acc.fill(0);
     for (let b = 0; b < 16; b++) {
       const rr = r - 1 + (b >> 2), cc = c - 1 + (b & 3);
-      if (rr < 0 || cc < 0 || rr >= f.nr || cc >= f.nc) continue;
+      if (rr < 0 || cc < 0 || rr >= nr || cc >= nc) continue;
       const dr = fr - rr, dc = fc - cc, d2 = dr * dr + dc * dc;
       if (d2 >= R2) continue;
-      // a model point in the water always counts at its own position
-      if (!(allowed & (1 << b)) && !(d2 < 1e-18 && bar && !bar.land[rr * f.nc + cc])) continue;
-      const idx = base + rr * f.nc + cc, u = f.u[idx];
-      if (u === NODATA) continue;
+      // a grid point in the water always counts at its own position
+      if (!(allowed & (1 << b)) && !(d2 < 1e-18 && bar && !bar.land[rr * nc + cc])) continue;
+      const idx = base + rr * nc + cc;
+      if (!valid(arrays[0][idx])) continue;
       n++;
       if (d2 < 1e-18) { exact = idx; continue; }
       const d = Math.sqrt(d2), w = ((R - d) / (R * d)) ** 2;
-      su += w * u; sv += w * f.v[idx]; sw += w;
+      for (let i = 0; i < m; i++) acc[i] += w * arrays[i][idx];
+      sw += w;
     }
     if (n < 2) return false;
-    if (exact >= 0) { out[0] = f.u[exact]; out[1] = f.v[exact]; return true; }
+    if (exact >= 0) { for (let i = 0; i < m; i++) out[i] = arrays[i][exact]; return true; }
     if (sw === 0) return false;
-    out[0] = su / sw; out[1] = sv / sw;
+    for (let i = 0; i < m; i++) out[i] = acc[i] / sw;
     return true;
   }
   sample.hasBarriers = !!bar;
+  sample.steps = arrays[0].length / plane;
   return sample;
 }
 
-/** "flows towards" direction in degrees (0 = north, 90 = east) */
+/** "flows/blows towards" direction in degrees (0 = north, 90 = east) */
 export const direction = (u, v) => (Math.atan2(u, v) * 180 / Math.PI + 360) % 360;
 export const compass = deg => ['N', 'NO', 'O', 'SO', 'S', 'SW', 'W', 'NW'][Math.round(deg / 45) % 8];

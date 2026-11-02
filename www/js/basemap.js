@@ -4,7 +4,7 @@
 //    so previously viewed areas also show the full map without network.
 //    (OSM's tile policy forbids bulk pre-downloading, so we only keep what was viewed.)
 
-const TILE_CACHE = 'osm-tiles-v1';
+const TILE_CACHE = 'osm-tiles-v1';  // also holds satellite, depth and turbidity tiles that were viewed
 const SEA = '#aad3df', LAND = '#f2efe9', SHORE = '#8fb4c0';
 
 export function createCoastBackground(L, coast) {
@@ -39,8 +39,9 @@ export function createCoastBackground(L, coast) {
   });
 }
 
-export function createCachedTileLayer(L) {
-  return L.TileLayer.extend({
+/** Any Leaflet tile layer class (TileLayer, TileLayer.WMS) whose viewed tiles are kept on the phone. */
+export function createCachedTileLayer(L, Base = L.TileLayer) {
+  return Base.extend({
     createTile(coords, done) {
       const img = document.createElement('img');
       img.alt = ''; img.setAttribute('role', 'presentation');

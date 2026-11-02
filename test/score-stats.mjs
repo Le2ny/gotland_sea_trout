@@ -1,18 +1,21 @@
 // Statistics of the original scoring over the next 72 h for all spots (real data),
 // used as evidence for the scoring suggestions.
 import fs from 'node:fs';
-import { downloadForecast } from '../www/js/copernicus.js';
+import { downloadOcean } from '../www/js/copernicus.js';
+import { coastIndex } from '../www/js/geo.js';
 import { makeSampler } from '../www/js/field.js';
 import { downloadWeather } from '../www/js/weather.js';
 import { rankAll, exposure, angleDiff } from '../www/js/ranking.js';
 globalThis.atob ??= s => Buffer.from(s, 'base64').toString('binary');
 const d = n => JSON.parse(fs.readFileSync(new URL(`../www/data/${n}.json`, import.meta.url)));
 const spots = d('spots'), barriers = d('barriers');
-const f = await downloadForecast(); const w = await downloadWeather(spots, f.times);
-const sample = makeSampler(f, barriers);
+const o = await downloadOcean(); const f = { times: o.times }; const ix = coastIndex(d('coast'));
+const w = await downloadWeather(spots, f.times, (lat, lon) => ix.onLand(lon, lat));
+const sample = makeSampler(o.grid, [o.u, o.v], barriers);
+const gw = (s, k) => { const x = w.spots.find(y => y.id === s.id); return { w: x?.wind[k], m: x?.marine[k] }; };
 const all = []; const reasonCount = {}; const topPerHour = [];
 for (let k = 0; k < f.times.length; k++) {
-  const r = rankAll(spots, sample, k, w); topPerHour.push(r.filter(x => x.score >= 90).length);
+  const r = rankAll(spots, sample, k, gw); topPerHour.push(r.filter(x => x.score >= 90).length);
   for (const x of r) { all.push({ ...x, k }); for (const re of x.reasons) reasonCount[re] = (reasonCount[re] || 0) + 1; }
 }
 const N = all.length, pct = n => (100 * n / N).toFixed(1) + ' %';

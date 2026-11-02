@@ -1,9 +1,10 @@
 // Tests the published web app (GitHub Pages): first start, forecast download,
 // then full offline restart served by the service worker.
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
+const engine = process.env.ENGINE === 'webkit' ? webkit : chromium;
 const URL_ = process.argv[2] || 'https://le2ny.github.io/gotland_sea_trout/', out = process.argv[3] || '.';
-const b = await chromium.launch();
-const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true,
+const b = await engine.launch();
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: process.env.ENGINE !== 'webkit' || true, hasTouch: true,
   userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });
 const p = await ctx.newPage(); const errs = [];
 p.on('pageerror', e => errs.push(e.message)); p.on('console', m => m.type() === 'error' && errs.push(m.text()));

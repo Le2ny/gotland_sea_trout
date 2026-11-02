@@ -1,13 +1,23 @@
-// Copernicus Baltic current forecast, fetched directly from the public ARCO Zarr store.
-// Only the Gotland rows are downloaded: each chunk is Blosc-compressed in independent
-// 512 KB blocks, so an HTTP range request on the header + the needed blocks is enough.
+// Copernicus Baltic Sea forecast (BALTICSEA_ANALYSISFORECAST_PHY_003_006), fetched directly
+// from the public ARCO Zarr stores – no account, no server of our own.
+//
+// Only the Gotland rows are downloaded: every chunk is Blosc-compressed in independent
+// 512 KB blocks, so an HTTP range request for the header plus the needed blocks is enough.
 // Values are bit-identical to decoding the full chunk (verified 2026-11-02).
+//
+// Dataset versions change (202411 is retired on 2027-01-12, 202611 released 2026-11-24).
+// discoverDatasets() reads the official STAC catalogue and picks the newest released
+// version, so the app keeps working without an update.
 
-export const BASE = 'https://s3.waw3-1.cloudferro.com/mdl-arco-time-001/arco/' +
-  'BALTICSEA_ANALYSISFORECAST_PHY_003_006/cmems_mod_bal_phy_anfc_PT15M-i_202411/timeChunked.zarr';
+const STAC = 'https://stac.marine.copernicus.eu/metadata/BALTICSEA_ANALYSISFORECAST_PHY_003_006/';
+const FALLBACK = {
+  cur: { id: 'cmems_mod_bal_phy_anfc_PT15M-i_202411', url: 'https://s3.waw3-1.cloudferro.com/mdl-arco-time-001/arco/BALTICSEA_ANALYSISFORECAST_PHY_003_006/cmems_mod_bal_phy_anfc_PT15M-i_202411/timeChunked.zarr' },
+  hourly: { id: 'cmems_mod_bal_phy_anfc_PT1H-i_202411', url: 'https://s3.waw3-1.cloudferro.com/mdl-arco-time-002/arco/BALTICSEA_ANALYSISFORECAST_PHY_003_006/cmems_mod_bal_phy_anfc_PT1H-i_202411/timeChunked.zarr' },
+};
 export const BBOX = { south: 56.6, north: 58.3, west: 17.4, east: 20.1 };
 export const NODATA = -999;
-const HOURS = 72;
+export const HOURS = 72;
+export const TEMP_STEP_H = 3;  // water temperature changes slowly: every 3 h saves ~2/3 of its download
 
 async function get(url, range) {
   const headers = range ? { Range: `bytes=${range[0]}-${range[1]}` } : {};
@@ -18,7 +28,7 @@ async function get(url, range) {
   return buf;
 }
 
-// ---- Blosc 1 + LZ4 decoder (only what this dataset uses: lz4, byte shuffle, split streams)
+// ---- Blosc 1 + LZ4 decoder (what these datasets use: lz4, byte shuffle, split streams)
 function lz4Block(src, outLen) {
   const dst = new Uint8Array(outLen); let i = 0, o = 0;
   while (i < src.length) {
@@ -51,7 +61,7 @@ function decodeBlock(h, j, comp) {
   let raw;
   if (h.flags & 2) raw = comp.slice(0, bsz);
   else {
-    const leftover = bsz < h.bsize, split = !(h.flags & 0x10);
+    const leftover = bsz < h.bsize, split = !(h.flags & 0x10);  // blosc1 never splits the trailing short block
     const ns = split && !leftover && bsz / h.ts >= 128 ? h.ts : 1, sl = bsz / ns;
     raw = new Uint8Array(bsz); const dv = new DataView(comp.buffer, comp.byteOffset, comp.byteLength);
     let p = 0;
@@ -77,51 +87,70 @@ function decodeFull(b) {
   return out;
 }
 
-// ---- forecast download
-async function pool(tasks, n, onDone) {
-  let next = 0, done = 0;
-  await Promise.all(Array.from({ length: n }, async () => {
-    while (next < tasks.length) { const t = tasks[next++]; await t(); onDone(++done, tasks.length); }
-  }));
+// ---- dataset discovery
+async function datasetInfo(id) {
+  const d = await (await fetch(`${STAC}${id}/dataset.stac.json`, { cache: 'no-store' })).json();
+  const p = d.properties || {}, now = Date.now();
+  const released = !p.admp_released_date || Date.parse(p.admp_released_date) <= now;
+  const retired = p.admp_retired_date && Date.parse(p.admp_retired_date) <= now;
+  const url = d.assets?.timeChunked?.href;
+  return released && !retired && url ? { id, url, retires: p.admp_retired_date || null } : null;
 }
 
-/** Model grid of the Gotland window (real coordinate arrays, not reconstructed). */
-export async function fetchGrid(g = get) {
-  const meta = JSON.parse(new TextDecoder().decode(await g(BASE + '/.zmetadata'))).metadata;
-  const za = meta['uo/.zarray'], [, NLAT, NLON] = za.shape;
-  if (za.dtype !== '<f4' || za.chunks[1] !== NLAT || za.chunks[2] !== NLON) throw new Error('Copernicus-Datenlayout hat sich geändert');
-  const lat = new Float32Array(decodeFull(await g(BASE + '/latitude/0')).buffer, 0, NLAT);
-  const lon = new Float32Array(decodeFull(await g(BASE + '/longitude/0')).buffer, 0, NLON);
+/** Newest released, not retired version of the 15-min and the hourly dataset. */
+export async function discoverDatasets() {
+  try {
+    const prod = await (await fetch(STAC + 'product.stac.json', { cache: 'no-store' })).json();
+    const ids = prod.links.filter(l => l.rel === 'item').map(l => l.href.split('/')[0]);
+    const pick = async re => {
+      const cands = ids.filter(i => re.test(i)).sort().reverse();  // newest version first (…_YYYYMM)
+      for (const id of cands) { try { const x = await datasetInfo(id); if (x) return x; } catch { /* try next */ } }
+      return null;
+    };
+    const [cur, hourly] = await Promise.all([pick(/^cmems_mod_bal_phy_anfc_PT15M-i_\d{6}$/), pick(/^cmems_mod_bal_phy_anfc_PT1H-i_\d{6}$/)]);
+    return { cur: cur || FALLBACK.cur, hourly: hourly || FALLBACK.hourly };
+  } catch {
+    return { ...FALLBACK };
+  }
+}
+
+/** Model grid of the Gotland window from a dataset (real coordinate arrays, not reconstructed). */
+export async function fetchGrid(ds, g = get) {
+  const meta = JSON.parse(new TextDecoder().decode(await g(ds.url + '/.zmetadata'))).metadata;
+  const lat = new Float32Array(decodeFull(await g(ds.url + '/latitude/0')).buffer, 0, meta['latitude/.zarray'].shape[0]);
+  const lon = new Float32Array(decodeFull(await g(ds.url + '/longitude/0')).buffer, 0, meta['longitude/.zarray'].shape[0]);
+  const NLAT = lat.length, NLON = lon.length;
   const r0 = lat.findIndex(v => v >= BBOX.south), r1 = lat.findLastIndex(v => v <= BBOX.north);
   const c0 = lon.findIndex(v => v >= BBOX.west), c1 = lon.findLastIndex(v => v <= BBOX.east);
-  return { meta, NLAT, NLON, r0, r1, c0, c1, nr: r1 - r0 + 1, nc: c1 - c0 + 1,
+  // time axis (days since 1900-01-01), regular steps; read the last chunk
+  const tz = meta['time/.zarray'], NT = tz.shape[0], TC = tz.chunks[0];
+  const tv = new Float64Array(decodeFull(await g(`${ds.url}/time/${Math.floor((NT - 1) / TC)}`)).buffer);
+  const toMs = d => Date.UTC(1900, 0, 1) + Math.round(d * 86400000);
+  const stepMs = toMs(tv[1]) - toMs(tv[0]), lastMs = toMs(tv[(NT - 1) % TC]);
+  return { ds, meta, NLAT, NLON, r0, r1, c0, c1, nr: r1 - r0 + 1, nc: c1 - c0 + 1, NT, stepMs, lastMs,
     lat: Array.from(lat.subarray(r0, r1 + 1)), lon: Array.from(lon.subarray(c0, c1 + 1)) };
 }
 
-/** Downloads the next 72 h (hourly) of uo/vo for Gotland. onProgress(done,total,bytes). */
-export async function downloadForecast(onProgress = () => {}) {
-  let bytes = 0; const g = async (u, r) => { const b = await get(u, r); bytes += b.length; return b; };
-  const grid = await fetchGrid(g);
-  const { meta, NLAT, NLON, r0, r1, c0, nr, nc } = grid, CT = meta['uo/.zarray'].chunks[0];
+const indexOf = (grid, ms) => (grid.NT - 1) - Math.round((grid.lastMs - ms) / grid.stepMs);
 
-  // time axis (days since 1900-01-01), regular 15 min steps
-  const tz = meta['time/.zarray'], NT = tz.shape[0], TC = tz.chunks[0];
-  const tchunk = Math.floor((NT - 1) / TC);
-  const tv = new Float64Array(decodeFull(await g(`${BASE}/time/${tchunk}`)).buffer);
-  const toMs = d => Date.UTC(1900, 0, 1) + d * 86400000;
-  const stepMs = toMs(tv[1]) - toMs(tv[0]);
-  const lastMs = toMs(tv[(NT - 1) % TC]);
-  const nowHour = Math.floor(Date.now() / 3600000) * 3600000;
-  const iNow = (NT - 1) - Math.round((lastMs - nowHour) / stepMs);
-  if (iNow < 0 || iNow > NT - 1) throw new Error('Keine Prognose für die aktuelle Stunde gefunden');
-  const perHour = Math.round(3600000 / stepMs);
-  const times = [], idx = [];
-  for (let k = 0; k <= HOURS && iNow + k * perHour < NT; k++) { idx.push(iNow + k * perHour); times.push(nowHour + k * 3600000); }
+/** Surface level index for 4-D variables (time, elevation, lat, lon). */
+async function surfaceLevel(grid, g) {
+  const dims = grid.meta['elevation/.zarray'];
+  if (!dims) return 0;
+  const el = new Float32Array(decodeFull(await g(grid.ds.url + '/elevation/0')).buffer, 0, dims.shape[0]);
+  let best = 0; for (let i = 1; i < el.length; i++) if (Math.abs(el[i]) < Math.abs(el[best])) best = i;
+  return best;
+}
 
-  const plane = nr * nc, u = new Float32Array(times.length * plane), v = new Float32Array(times.length * plane);
-  const tasks = [];
-  for (let k = 0; k < idx.length; k++) for (const [name, dst] of [['uo', u], ['vo', v]]) tasks.push(async () => {
-    const t = idx[k], url = `${BASE}/${name}/${Math.floor(t / CT)}.0.0`, ti = t % CT;
+/** Task list that fills dst[k*plane …] with the Gotland window of `name` at time index idx[k]. */
+function seriesTasks(grid, name, idx, dst, g, level = 0) {
+  const za = grid.meta[`${name}/.zarray`];
+  if (!za || za.dtype !== '<f4') throw new Error(`Copernicus-Variable ${name} fehlt oder hat ein anderes Format`);
+  const nd = za.shape.length, CT = za.chunks[0], { NLAT, NLON, r0, r1, c0, nr, nc } = grid, plane = nr * nc;
+  if (za.chunks[nd - 2] !== NLAT || za.chunks[nd - 1] !== NLON || (nd === 4 && za.chunks[1] !== 1)) throw new Error('Copernicus-Datenlayout hat sich geändert');
+  return idx.map((t, k) => async () => {
+    const key = nd === 4 ? `${Math.floor(t / CT)}.${level}.0.0` : `${Math.floor(t / CT)}.0.0`;
+    const url = `${grid.ds.url}/${name}/${key}`, ti = t % CT;
     const h = header(await g(url, [0, 255]));
     const lo = (ti * NLAT * NLON + r0 * NLON) * 4, hi = (ti * NLAT * NLON + (r1 + 1) * NLON) * 4 - 1;
     const j0 = Math.floor(lo / h.bsize), j1 = Math.floor(hi / h.bsize);
@@ -129,7 +158,7 @@ export async function downloadForecast(onProgress = () => {}) {
     const raw = new Uint8Array((j1 - j0 + 1) * h.bsize); let p = 0;
     for (let j = j0; j <= j1; j++) {
       const n = h.starts[j + 1] - h.starts[j];
-      const blk = decodeBlock(h, j, comp.subarray(p, p + n)); raw.set(blk, (j - j0) * h.bsize); p += n;
+      raw.set(decodeBlock(h, j, comp.subarray(p, p + n)), (j - j0) * h.bsize); p += n;
     }
     const f = new Float32Array(raw.buffer), base = (j0 * h.bsize) / 4;
     for (let r = 0; r < nr; r++) {
@@ -137,10 +166,60 @@ export async function downloadForecast(onProgress = () => {}) {
       dst.set(f.subarray(src, src + nc), k * plane + r * nc);
     }
   });
+}
+
+async function pool(tasks, n, onDone) {
+  let next = 0, done = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tasks.length) }, async () => {
+    while (next < tasks.length) { const t = tasks[next++]; await t(); onDone(++done, tasks.length); }
+  }));
+}
+
+const gridOut = grid => ({ nr: grid.nr, nc: grid.nc, lat: grid.lat, lon: grid.lon, dataset: grid.ds.id });
+
+/**
+ * Downloads the next 72 h for Gotland:
+ *  - currents uo/vo and sea level sla, hourly (15-min dataset)
+ *  - surface water temperature thetao, every TEMP_STEP_H hours (hourly dataset)
+ * onProgress(done, total, bytes)
+ */
+export async function downloadOcean(onProgress = () => {}) {
+  let bytes = 0; const g = async (u, r) => { const b = await get(u, r); bytes += b.length; return b; };
+  const ds = await discoverDatasets();
+  const [grid, gridH] = await Promise.all([fetchGrid(ds.cur, g), fetchGrid(ds.hourly, g)]);
+  const nowHour = Math.floor(Date.now() / 3600000) * 3600000;
+  const times = [];
+  for (let k = 0; k <= HOURS; k++) { const ms = nowHour + k * 3600000; if (ms <= grid.lastMs) times.push(ms); }
+  if (!times.length || indexOf(grid, times[0]) < 0) throw new Error('Keine Prognose für die aktuelle Stunde gefunden');
+  const tTimes = [];
+  for (let ms = Math.floor(nowHour / (TEMP_STEP_H * 3600000)) * TEMP_STEP_H * 3600000; ms <= times.at(-1) + TEMP_STEP_H * 3600000; ms += TEMP_STEP_H * 3600000)
+    if (ms <= gridH.lastMs && indexOf(gridH, ms) >= 0) tTimes.push(ms);
+
+  const plane = grid.nr * grid.nc, planeH = gridH.nr * gridH.nc;
+  const u = new Float32Array(times.length * plane), v = new Float32Array(times.length * plane), sla = new Float32Array(times.length * plane);
+  const temp = new Float32Array(tTimes.length * planeH);
+  const idx = times.map(ms => indexOf(grid, ms)), idxH = tTimes.map(ms => indexOf(gridH, ms));
+  const level = await surfaceLevel(gridH, g);
+  const tasks = [
+    ...seriesTasks(grid, 'uo', idx, u, g), ...seriesTasks(grid, 'vo', idx, v, g),
+    ...seriesTasks(grid, 'sla', idx, sla, g), ...seriesTasks(gridH, 'thetao', idxH, temp, g, level),
+  ];
   await pool(tasks, 6, (d, n) => onProgress(d, n, bytes));
 
   return {
-    version: 1, fetchedAt: Date.now(), modelLastTime: lastMs, times, nr, nc,
-    lat: grid.lat, lon: grid.lon, u, v, bytes,
+    version: 2, fetchedAt: Date.now(), modelLastTime: grid.lastMs, times, bytes,
+    grid: gridOut(grid), u, v, sla,
+    temp: { grid: gridOut(gridH), times: tTimes, data: temp },
+    datasets: { cur: ds.cur.id, hourly: ds.hourly.id, retires: ds.cur.retires },
   };
+}
+
+/** Cheap check (a few hundred bytes): has Copernicus published a newer forecast run? */
+export async function newerRunAvailable(fetchedAt) {
+  try {
+    const ds = await discoverDatasets();
+    const r = await fetch(ds.cur.url + '/.zmetadata', { method: 'HEAD', cache: 'no-store' });
+    const lm = Date.parse(r.headers.get('last-modified') || '');
+    return Number.isFinite(lm) ? lm > fetchedAt : null;
+  } catch { return null; }
 }

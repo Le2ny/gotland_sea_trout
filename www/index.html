@@ -23,8 +23,15 @@
     <div id="status">Lade gespeicherte Prognose …</div>
     <button id="btnLoad" type="button">Prognose laden</button>
   </header>
-
   <div id="progress" hidden><div id="bar"></div><span id="progressText"></span></div>
+  <div id="modeHint" hidden></div>
+  <div id="gpsWarn" hidden></div>
+
+  <nav id="fabs">
+    <button id="btnLayers" type="button" aria-label="Ebenen" title="Ebenen">☰</button>
+    <button id="btnGps" type="button" aria-label="Mein Standort" title="Mein Standort">⌖</button>
+    <button id="btnMore" type="button" aria-label="Mehr" title="Mehr">⋯</button>
+  </nav>
 
   <footer id="bottom">
     <div class="row">
@@ -33,7 +40,7 @@
       <button id="btnSpots" type="button">Top-Spots</button>
     </div>
     <input id="slider" type="range" min="0" max="72" value="0" step="1" disabled>
-    <div id="legend"><span>Strömung 0</span><canvas id="legendBar" width="256" height="10"></canvas><span>0,7 m/s</span></div>
+    <div id="legend"><b id="legendName">Strömung</b><span id="legendLo">0</span><canvas id="legendBar" width="256" height="10"></canvas><span id="legendHi">0,7 m/s</span><small id="legendNote"></small></div>
   </footer>
 
   <section id="sheet" hidden>
@@ -41,8 +48,8 @@
     <div id="sheetBody"></div>
   </section>
 
-  <script src="lib/leaflet/leaflet.js"></script>
   <script>setTimeout(() => document.getElementById("intro")?.remove(), 6000);</script>
+  <script src="lib/leaflet/leaflet.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

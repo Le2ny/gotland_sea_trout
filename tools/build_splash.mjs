@@ -3,7 +3,7 @@
 // Usage: node tools/build_splash.mjs   (downloads one forecast, ~56 MB)
 import fs from 'node:fs';
 import { chromium } from 'playwright';
-import { downloadForecast } from '../www/js/copernicus.js';
+import { downloadOcean } from '../www/js/copernicus.js';
 import { makeSampler } from '../www/js/field.js';
 globalThis.atob ??= s => Buffer.from(s, 'base64').toString('binary');
 
@@ -14,8 +14,9 @@ const palette = JSON.parse(fs.readFileSync(www + 'data/palette.json'));
 const barriers = JSON.parse(fs.readFileSync(www + 'data/barriers.json'));
 const icon = fs.readFileSync(www + 'icon.svg', 'utf8');
 
-const f = await downloadForecast();
-const sample = makeSampler(f, barriers), uv = [0, 0];
+const o = await downloadOcean();
+const f = { ...o.grid, times: o.times, u: o.u, v: o.v };
+const sample = makeSampler(o.grid, [o.u, o.v], barriers), uv = [0, 0];
 // pick the hour with the strongest mean current: livelier picture
 let k = 0, best = -1;
 for (let h = 0; h < f.times.length; h += 3) {

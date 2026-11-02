@@ -52,10 +52,21 @@ export function currentContext(sample, k, s) {
   return { v, dir, dist: at.dist, edge: vals.length ? Math.max(...vals) - Math.min(...vals) : 0, edgePoints: vals.length };
 }
 
-export function rankAll(spots, sample, k, weather) {
-  return spots.map((s, i) => {
-    const w = weather?.spots[i]?.wind[k] ?? null, m = weather?.spots[i]?.marine[k] ?? null;
+/** getWeather(spot, k) → { w, m } in the units of the original app (wind km/h, waves m, SST °C) */
+export function rankAll(spots, sample, k, getWeather) {
+  return spots.map(s => {
+    const { w = null, m = null, src = null } = getWeather ? getWeather(s, k) || {} : {};
     const cur = sample ? currentContext(sample, k, s) : null;
-    return { spot: s, w, m, cur, ...scoreDetailed(w, m, s, cur) };
+    return { spot: s, w, m, src, cur, ...scoreDetailed(w, m, s, cur) };
   }).sort((a, b) => b.score - a.score);
+}
+
+/** best hour per spot within [k0, k1] */
+export function bestTimes(spots, sample, k0, k1, getWeather) {
+  const best = new Map();
+  for (let k = k0; k <= k1; k++) for (const r of rankAll(spots, sample, k, getWeather)) {
+    const b = best.get(r.spot.id);
+    if (!b || r.score > b.score) best.set(r.spot.id, { ...r, k });
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score || a.k - b.k);
 }
