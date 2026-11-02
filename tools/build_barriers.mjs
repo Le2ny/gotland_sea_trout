@@ -2,9 +2,9 @@
 // without the connecting line crossing the OSM coastline (and which are on land).
 // Output: www/data/barriers.json, used by field.js at runtime as a simple lookup.
 //
-// Each model cell (4 corner points) is split into S×S sub-areas (~150 m). For every
-// sub-area centre a 4-bit mask stores which corners are visible over water.
-// Cells far from any coastline are omitted (= all four corners allowed).
+// Each model cell is split into S×S sub-areas (~150 m). For every sub-area centre a
+// 16-bit mask stores which of the 4×4 surrounding model points are visible over water.
+// Cells far from any coastline are omitted (= all candidates allowed).
 //
 // Usage: node tools/build_barriers.mjs
 import fs from 'node:fs';
@@ -68,32 +68,54 @@ const hasSegments = (s, w, n, e) => {
   return false;
 };
 
+// Candidates for a position in cell (r,c): model points rows r-1..r+2, cols c-1..c+2 (16 points),
+// which covers every point within 1.5 grid spacings. Bit k <-> (r-1+(k>>2), c-1+(k&3)).
 const cells = {}; let coastal = 0, landCells = 0;
 const t0 = Date.now();
 for (let r = 0; r < nr - 1; r++) for (let c = 0; c < nc - 1; c++) {
   const s = lat[r], n = lat[r + 1], w = lon[c], e = lon[c + 1];
-  const corners = [[w, s], [e, s], [w, n], [e, n]];  // bit i: row offset i>>1, col offset i&1 (same as field.js)
-  const anyLandCorner = [0, 1, 2, 3].some(i => cornerLand[(r + (i >> 1)) * nc + c + (i & 1)]);
-  if (!hasSegments(s, w, n, e) && !anyLandCorner) continue;               // open sea: all corners allowed
-  if (!hasSegments(s, w, n, e) && cornerLand[r * nc + c]) { cells[r * (nc - 1) + c] = 'L'; landCells++; continue; } // inland
+  const cand = [];
+  for (let k = 0; k < 16; k++) {
+    const rr = r - 1 + (k >> 2), cc = c - 1 + (k & 3);
+    cand.push(rr >= 0 && cc >= 0 && rr < nr && cc < nc && !cornerLand[rr * nc + cc] ? [lon[cc], lat[rr]] : null);
+  }
+  const ns = lat[Math.max(0, r - 1)], nn = lat[Math.min(nr - 1, r + 2)], nw = lon[Math.max(0, c - 1)], ne = lon[Math.min(nc - 1, c + 2)];
+  const anyLand = cand.some((p, k) => { const rr = r - 1 + (k >> 2), cc = c - 1 + (k & 3); return rr >= 0 && cc >= 0 && rr < nr && cc < nc && cornerLand[rr * nc + cc]; });
+  if (!hasSegments(ns, nw, nn, ne) && !anyLand) continue;              // open sea: all candidates usable
+  if (!hasSegments(s, w, n, e) && onLand((w + e) / 2, (s + n) / 2)) { cells[r * (nc - 1) + c] = 'L'; landCells++; continue; } // inland
   coastal++;
-  const m = new Uint8Array(S * S);
+  const m = new Uint16Array(S * S);
   for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     const y = s + (i + 0.5) / S * (n - s), x = w + (j + 0.5) / S * (e - w);
     if (onLand(x, y)) continue;
     let bits = 0;
-    for (let k = 0; k < 4; k++) {
-      if (cornerLand[(r + (k >> 1)) * nc + c + (k & 1)]) continue;
-      if (!crossesCoast(x, y, corners[k][0], corners[k][1])) bits |= 1 << k;
-    }
+    for (let k = 0; k < 16; k++) if (cand[k] && !crossesCoast(x, y, cand[k][0], cand[k][1])) bits |= 1 << k;
     m[i * S + j] = bits;
   }
-  cells[r * (nc - 1) + c] = Buffer.from(m).toString('base64');
+  // Sub-areas whose centre is on land but which still contain water along the shore would
+  // otherwise stay completely empty (blocky gaps). They take the mask of the nearest
+  // sub-area in the same cell whose centre is in the water (land itself is cut out exactly
+  // by the coastline when drawing). Only a single neighbour is used, never a union.
+  const isLand = new Uint8Array(S * S);
+  for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) isLand[i * S + j] = onLand(w + (j + 0.5) / S * (e - w), s + (i + 0.5) / S * (n - s)) ? 1 : 0;
+  const fixed = m.slice();
+  for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
+    if (!isLand[i * S + j]) continue;
+    let best = -1, bd = 9;
+    for (let di = -2; di <= 2; di++) for (let dj = -2; dj <= 2; dj++) {
+      const ii = i + di, jj = j + dj;
+      if (ii < 0 || jj < 0 || ii >= S || jj >= S || isLand[ii * S + jj]) continue;
+      const d = di * di + dj * dj; if (d < bd) { bd = d; best = ii * S + jj; }
+    }
+    if (best >= 0) fixed[i * S + j] = m[best];
+  }
+  m.set(fixed);
+  cells[r * (nc - 1) + c] = Buffer.from(m.buffer).toString('base64');
 }
 console.log(`${coastal} coastal cells, ${landCells} inland cells, ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
-const out = { version: 1, S, nr, nc, lat0: lat[0], lon0: lon[0], latN: lat[nr - 1], lonN: lon[nc - 1],
+const out = { version: 2, radius: 1.5, S, nr, nc, lat0: lat[0], lon0: lon[0], latN: lat[nr - 1], lonN: lon[nc - 1],
   landCorners: Buffer.from(cornerLand).toString('base64'), cells,
-  note: 'Coastline © OpenStreetMap contributors (ODbL). bit k of a sub-area = corner (row+(k>>1), col+(k&1)) reachable over water.' };
+  note: 'Coastline © OpenStreetMap contributors (ODbL). uint16 per sub-area: bit k = model point (row-1+(k>>2), col-1+(k&3)) reachable over water and not on land.' };
 fs.writeFileSync(root + 'barriers.json', JSON.stringify(out));
 console.log('barriers.json', Math.round(fs.statSync(root + 'barriers.json').size / 1024), 'KB');

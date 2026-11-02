@@ -9,7 +9,7 @@ const srv = http.createServer((q, s) => { const f = path.join(root, decodeURICom
 const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 400, height: 860 }, deviceScaleFactor: 2.5, isMobile: true, hasTouch: true });
 const p = await ctx.newPage();
 const errs = []; p.on('pageerror', e => errs.push(e.message)); p.on('console', m => m.type() === 'error' && errs.push(m.text()));
-await p.goto('http://localhost:8765/'); await p.waitForTimeout(1500);
+await p.goto('http://localhost:8765/'); await p.waitForTimeout(300); await p.screenshot({ path: `${out}/0-intro.png` }); await p.waitForTimeout(2200);
 await p.click('#btnLoad'); await p.waitForFunction(() => /Fertig|Fehler/.test(document.getElementById('progressText').textContent), null, { timeout: 180000 });
 console.log('progress:', await p.textContent('#progressText')); await p.waitForTimeout(3000);
 await p.screenshot({ path: `${out}/1-overview.png` });

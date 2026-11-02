@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+  <div id="intro"><img src="img/intro.jpg" alt=""></div>
   <div id="map"></div>
 
   <header id="top">
@@ -33,6 +34,7 @@
   </section>
 
   <script src="lib/leaflet/leaflet.js"></script>
+  <script>setTimeout(() => document.getElementById("intro")?.remove(), 6000);</script>
   <script type="module" src="js/main.js"></script>
 </body>
 </html>

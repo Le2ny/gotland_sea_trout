@@ -7,6 +7,7 @@ import { rankAll, exposure } from './ranking.js';
 import * as store from './store.js';
 
 const $ = id => document.getElementById(id);
+const introShownAt = performance.now();
 const fmtTime = ms => new Date(ms).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 const fmtNum = (x, d = 2) => x.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
@@ -161,3 +162,4 @@ try {
   }
 } catch (e) { $('status').textContent = 'Speicher nicht lesbar: ' + e.message; }
 setInterval(() => forecast && updateStatus(), 60000);
+setTimeout(() => { $('intro').classList.add('gone'); setTimeout(() => $('intro').remove(), 700); }, Math.max(0, 1400 - (performance.now() - introShownAt)));

@@ -29,4 +29,6 @@ for (let r = 0; r < f.nr - 1; r += 0.13) for (let c = 0; c < f.nc - 1; c += 0.13
   if (!a) { removed++; continue; }
   const d = Math.hypot(uv[0] - uv2[0], uv[1] - uv2[1]); if (d > 1e-9) { changed++; maxDiff = Math.max(maxDiff, d); }
 }
+let covered = 0; for (let r = 0; r < f.nr - 1; r += 0.13) for (let c = 0; c < f.nc - 1; c += 0.13) { const lat = f.lat[0] + r * (f.lat.at(-1) - f.lat[0]) / (f.nr - 1), lon = f.lon[0] + c * (f.lon.at(-1) - f.lon[0]) / (f.nc - 1); if (withB(0, lat, lon, uv)) covered++; }
+console.log(`coverage: ${covered} positions with a value (with barriers)`);
 console.log(`dense check: ${total} positions; barriers changed ${changed}, removed ${removed} (land or across-land only); max change ${maxDiff.toFixed(3)} m/s`);
