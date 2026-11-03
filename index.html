@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Gotland Sea Trout</title>
+  <meta name="theme-color" content="#0b3d4d">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Sea Trout">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="lib/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <div id="intro"><img src="img/intro.jpg" alt=""></div>
+  <div id="map"></div>
+
+  <header id="top">
+    <div id="status">Lade gespeicherte Prognose …</div>
+    <button id="btnLoad" type="button">Prognose laden</button>
+  </header>
+  <div id="progress" hidden><div id="bar"></div><span id="progressText"></span></div>
+  <div id="modeHint" hidden></div>
+  <div id="gpsWarn" hidden></div>
+
+  <nav id="fabs">
+    <button id="btnLayers" type="button" aria-label="Ebenen" title="Ebenen">☰</button>
+    <button id="btnSat" type="button" aria-label="Nur Satellit" title="Nur Satellit">🛰</button>
+    <button id="btnGps" type="button" aria-label="Mein Standort" title="Mein Standort">⌖</button>
+    <button id="btnDiary" type="button" aria-label="Tagebuch" title="Tagebuch">📖</button>
+    <button id="btnMore" type="button" aria-label="Mehr" title="Mehr">⋯</button>
+  </nav>
+
+  <footer id="bottom">
+    <div class="row">
+      <button id="btnPlay" type="button" aria-label="Abspielen">▶</button>
+      <div id="timeLabel">–</div>
+      <button id="btnPlan" type="button" class="planBtn">🗓 Tag planen</button>
+      <button id="btnSpots" type="button">Top-Spots</button>
+    </div>
+    <input id="slider" type="range" min="0" max="72" value="0" step="1" disabled>
+    <div id="legend"><b id="legendName">Strömung</b><span id="legendLo">0</span><canvas id="legendBar" width="256" height="10"></canvas><span id="legendHi">0,7 m/s</span><small id="legendNote"></small></div>
+  </footer>
+
+  <section id="sheet" hidden>
+    <div id="sheetHead"><b id="sheetTitle"></b><button id="sheetClose" type="button" aria-label="Schließen">✕</button></div>
+    <div id="sheetBody"></div>
+  </section>
+
+  <script>setTimeout(() => { if (!window.__appReady) document.getElementById("intro")?.remove(); }, 8000);</script>
+  <script src="lib/leaflet/leaflet.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

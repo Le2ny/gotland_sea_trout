@@ -1,0 +1,252 @@
+[
+ {
+  "id": 1,
+  "name": "Lickershamn",
+  "lat": 57.8259,
+  "lon": 18.5161,
+  "rating": 5,
+  "facing": 280,
+  "structure": "Kalk, Stein, Rinnen, Tang",
+  "protected": "Lickershamnsån"
+ },
+ {
+  "id": 2,
+  "name": "Sigsarve Strand",
+  "lat": 57.8664,
+  "lon": 18.5328,
+  "rating": 4,
+  "facing": 285,
+  "structure": "Klint, Kies, Stein, Tang",
+  "protected": "Ihreån"
+ },
+ {
+  "id": 3,
+  "name": "Häftingsklint",
+  "lat": 57.8855,
+  "lon": 18.5487,
+  "rating": 4,
+  "facing": 285,
+  "structure": "Klint, Stein, Kanten",
+  "protected": ""
+ },
+ {
+  "id": 4,
+  "name": "Hallshuk",
+  "lat": 57.9238,
+  "lon": 18.7442,
+  "rating": 5,
+  "facing": 310,
+  "structure": "Kies, Tang, Kalkkante",
+  "protected": ""
+ },
+ {
+  "id": 5,
+  "name": "Kappelshamn West",
+  "lat": 57.8554,
+  "lon": 18.7468,
+  "rating": 4,
+  "facing": 275,
+  "structure": "Bucht, Stein, Mischgrund",
+  "protected": "Vaste å / Kioskbäcken"
+ },
+ {
+  "id": 6,
+  "name": "Kappelshamn Ost / Bläse",
+  "lat": 57.8412,
+  "lon": 18.833,
+  "rating": 4,
+  "facing": 55,
+  "structure": "Kalk, Stein, flache Kanten",
+  "protected": ""
+ },
+ {
+  "id": 7,
+  "name": "Fårösund West",
+  "lat": 57.8629,
+  "lon": 19.0302,
+  "rating": 3,
+  "facing": 255,
+  "structure": "Strömung, Stein/Sand",
+  "protected": ""
+ },
+ {
+  "id": 8,
+  "name": "Fårö West / Lauter",
+  "lat": 57.968,
+  "lon": 19.0908,
+  "rating": 4,
+  "facing": 285,
+  "structure": "Kalk, Raukar, Riffkanten",
+  "protected": ""
+ },
+ {
+  "id": 9,
+  "name": "Fårö Nord / Ekeviken",
+  "lat": 58.0087,
+  "lon": 19.2528,
+  "rating": 3,
+  "facing": 15,
+  "structure": "Bucht, Sand/Stein",
+  "protected": ""
+ },
+ {
+  "id": 10,
+  "name": "Slite Außenküste",
+  "lat": 57.7061,
+  "lon": 18.8485,
+  "rating": 3,
+  "facing": 70,
+  "structure": "Inseln, Stein, Rinnen",
+  "protected": ""
+ },
+ {
+  "id": 11,
+  "name": "Åminne / Gothem",
+  "lat": 57.5729,
+  "lon": 18.8098,
+  "rating": 3,
+  "facing": 85,
+  "structure": "Sand, Stein, Flachwasser",
+  "protected": "Vikeån / Gothemsån"
+ },
+ {
+  "id": 12,
+  "name": "Katthammarsvik",
+  "lat": 57.4321,
+  "lon": 18.8626,
+  "rating": 4,
+  "facing": 95,
+  "structure": "Stein, Buchten, Kanten",
+  "protected": ""
+ },
+ {
+  "id": 13,
+  "name": "Herrvik / Östergarn",
+  "lat": 57.42,
+  "lon": 18.933,
+  "rating": 5,
+  "facing": 100,
+  "structure": "Riffe, Tangbänder, Rinnen",
+  "protected": ""
+ },
+ {
+  "id": 14,
+  "name": "Sandviken / Östergarn",
+  "lat": 57.4038,
+  "lon": 18.9204,
+  "rating": 4,
+  "facing": 105,
+  "structure": "Sand-Riff-Mischgrund",
+  "protected": ""
+ },
+ {
+  "id": 15,
+  "name": "Ljugarn / Folhammar",
+  "lat": 57.3319,
+  "lon": 18.727,
+  "rating": 5,
+  "facing": 105,
+  "structure": "Kalkriff, Raukar, Tang",
+  "protected": "Halsegårdaån / Hugreifsån / Gartarveån / Bane å"
+ },
+ {
+  "id": 16,
+  "name": "Närsholmen",
+  "lat": 57.2202,
+  "lon": 18.711,
+  "rating": 4,
+  "facing": 120,
+  "structure": "Flache Landzunge, Rinnen",
+  "protected": "Närkån"
+ },
+ {
+  "id": 17,
+  "name": "Grötlingbo",
+  "lat": 57.1008,
+  "lon": 18.4045,
+  "rating": 3,
+  "facing": 155,
+  "structure": "Flache Kalk-/Steinküste",
+  "protected": ""
+ },
+ {
+  "id": 18,
+  "name": "Holmhällar",
+  "lat": 56.98,
+  "lon": 18.2904,
+  "rating": 4,
+  "facing": 145,
+  "structure": "Raukar, Stein, Buchten",
+  "protected": ""
+ },
+ {
+  "id": 19,
+  "name": "Hoburgen",
+  "lat": 56.9185,
+  "lon": 18.117,
+  "rating": 4,
+  "facing": 205,
+  "structure": "Klippen, Kalkkanten",
+  "protected": ""
+ },
+ {
+  "id": 20,
+  "name": "Burgsvik West",
+  "lat": 57.0288,
+  "lon": 18.0842,
+  "rating": 3,
+  "facing": 265,
+  "structure": "Bucht, Sand/Stein",
+  "protected": ""
+ },
+ {
+  "id": 21,
+  "name": "Djupvik / Ekstakusten",
+  "lat": 57.3084,
+  "lon": 18.149,
+  "rating": 4,
+  "facing": 270,
+  "structure": "Offene Stein-/Riffküste, Sandstrand",
+  "protected": ""
+ },
+ {
+  "id": 22,
+  "name": "Klintehamn Süd",
+  "lat": 57.3618,
+  "lon": 18.115,
+  "rating": 3,
+  "facing": 270,
+  "structure": "Riffstruktur, Mischgrund",
+  "protected": ""
+ },
+ {
+  "id": 23,
+  "name": "Västergarn",
+  "lat": 57.4381,
+  "lon": 18.094,
+  "rating": 3,
+  "facing": 275,
+  "structure": "Bucht, Sand/Stein",
+  "protected": "Västergarnsån"
+ },
+ {
+  "id": 24,
+  "name": "Gnisvärd / Tofta",
+  "lat": 57.5045,
+  "lon": 18.073,
+  "rating": 4,
+  "facing": 280,
+  "structure": "Flach, Sand/Stein",
+  "protected": ""
+ },
+ {
+  "id": 25,
+  "name": "Själsö",
+  "lat": 57.6922,
+  "lon": 18.3521,
+  "rating": 3,
+  "facing": 285,
+  "structure": "Kalk, Stein, Kanten",
+  "protected": "Själsöån / Kolenskvarnån"
+ }
+]
