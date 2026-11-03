@@ -10,6 +10,8 @@ import * as store from './store.js';
 import { initIntro, HOW_HTML } from './intro.js';
 import { assess, bestWindows, fishable, MODEL_VERSION, STOCKHOLM, CATCH_RULES } from './assess.js';
 import { initPlanner } from './planui.js';
+import { initDiary } from './diaryui.js';
+import { legalStatus } from './assess.js';
 
 const $ = id => document.getElementById(id);
 const H = 3600000;
@@ -70,7 +72,7 @@ window.__map = map; window.__field = field; // for tests
 
 // ---------------------------------------------------------------- state
 let ocean = null, weather = null, hour = 0, S = {}, ranking = [], protection = bundledProtection, customSpots = [], home = null, newer = null;
-let settings = { sound: true, satOnly: false, marker: 'rank', filter: 'all', main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
+let settings = { sound: true, favorites: [], satOnly: false, marker: 'rank', filter: 'all', main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
 const allSpots = () => [...builtinSpots, ...customSpots];
 
 const qCache = new Map();
@@ -336,12 +338,14 @@ function openSpot(id) {
       <h4>Beste Zeitfenster (48 h)</h4>${wins.length ? `<div class="wins">${wins.map(w => `<button class="win" data-t="${w.from}">${fmtHour(w.from)}–${hhmm(w.to)}<b>${w.avg}</b></button>`).join('')}</div>` : '<p class="note">Kein befischbares Zeitfenster in den nächsten 48 h.</p>'}
       <details><summary>Wie der Index zustande kommt</summary><ul class="parts">${a.parts.map(p => `<li>${esc(p.label)} <b>${p.pts > 0 ? '+' : ''}${p.pts}</b></li>`).join('')}${a.raw > 100 ? `<li>Summe ${a.raw} → auf 100 begrenzt</li>` : ''}</ul></details>`;
   }
-  const btns = `<div class="sheetBtns"><a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Navigation</a><button id="spPlan" class="secondary">🗓 Zum Tagesplan</button>
+  const btns = `<div class="sheetBtns"><a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Navigation</a><button id="spPlan" class="secondary">🗓 Zum Tagesplan</button><button id="spSess" class="secondary">▶ Session</button><button id="spFav" class="secondary">${settings.favorites.includes(String(s.id)) ? '★ Favorit' : '☆ Favorit'}</button>
     ${custom ? '<button id="spEdit" class="secondary">Bearbeiten</button><button id="spDel" class="secondary">Löschen</button>' : ''}</div>`;
   sheet('spot', `${s.name}${r ? ` · ${r.score}/100` : ''}`, `${r ? `<div class="why">${esc(r.reasons.join(' · ') || 'keine Pluspunkte')}</div>` : ''}
     <dl class="facts">${facts}</dl>${protTxt}${btns}
     <p class="note">${ocean ? fmtTime(ocean.times[hour]) + ' · ' : ''}Spotbewertung ${s.rating}/5${custom ? ' · eigener Spot' : ''} · Index ≠ Fangwahrscheinlichkeit</p>`, s.id, () => {
     $('spPlan').onclick = () => planner.addSpot(s.id);
+    $('spSess').onclick = () => diaryUI.startAt(s.id);
+    $('spFav').onclick = () => { const id = String(s.id); settings.favorites = settings.favorites.includes(id) ? settings.favorites.filter(x => x !== id) : [...settings.favorites, id]; saveSettings(); openSpot(s.id); };
     $('sheetBody').querySelectorAll('.win').forEach(b => b.onclick = () => { setHour(Math.floor((+b.dataset.t - ocean.times[0]) / H)); });
     if (!custom) return;
     $('spEdit').onclick = () => editCustom(s);
@@ -407,6 +411,7 @@ function popupAt(ll) {
 let watchId = null, meMarker = null, meCircle = null, lastWarn = 0, centered = false;
 $('btnGps').onclick = () => {
   if (!navigator.geolocation) return alert('Standort ist auf diesem Gerät nicht verfügbar.');
+  if (watchId != null && meMarker && map.getCenter().distanceTo(meMarker.getLatLng()) > 30) { map.setView(meMarker.getLatLng(), Math.max(map.getZoom(), 14)); return; }
   if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; gpsLayer.clearLayers(); meMarker = meCircle = null; $('btnGps').classList.remove('on'); $('gpsWarn').hidden = true; return; }
   $('btnGps').classList.add('on'); centered = false;
   watchId = navigator.geolocation.watchPosition(pos => {
@@ -516,10 +521,19 @@ const planner = initPlanner({ L, map, $, esc, store, routes,
   sheet: (mode, title, html, a, b) => sheet(mode, title, html, null, typeof a === 'function' ? a : b),
   closeSheet: () => { $('sheet').hidden = true; }, toast: msg => { $('status').textContent = msg; },
   spots: () => allSpots(), quality, hasForecast: () => !!ocean, forecastRange: () => [ocean.times[0], ocean.times.at(-1)],
-  home: () => home,
+  home: () => home, favorites: () => settings.favorites, diary: () => diaryUI,
   fix: () => new Promise(res => { if (lastFix && Date.now() - lastFix.t < 120000) return res(lastFix);
     if (!navigator.geolocation) return res(null);
     navigator.geolocation.getCurrentPosition(p => { lastFix = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() }; res(lastFix); }, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }); }) });
+const diaryUI = await initDiary({ $, esc, store,
+  sheet: (mode, title, html, a) => sheet(mode, title, html, null, a), closeSheet: () => { $('sheet').hidden = true; }, toast: msg => { $('status').textContent = msg; },
+  spots: () => allSpots(), quality, fix: () => planner && lastFixP(), hhmm, fmtTime,
+  legalAt: (lat, lon, ms) => legalStatus({ lat, lon }, ms, protection),
+  forecastInfo: () => ocean ? { issuedAt: ocean.fetchedAt, sources: ocean.datasets } : null });
+function lastFixP() { return new Promise(res => { if (lastFix && Date.now() - lastFix.t < 120000) return res(lastFix); if (!navigator.geolocation) return res(null);
+  navigator.geolocation.getCurrentPosition(p => { lastFix = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() }; res(lastFix); }, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }); }); }
+$('btnDiary').onclick = () => diaryUI.open();
+window.__diary = diaryUI;
 $('btnPlan').onclick = () => planner.hasPlan() ? planner.showPlan() : planner.openForm();
 $('btnSat').onclick = () => { settings.satOnly = !settings.satOnly; saveSettings(); if (!settings.satOnly) update(); };
 window.__planner = planner;

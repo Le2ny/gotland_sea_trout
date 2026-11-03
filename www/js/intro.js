@@ -116,7 +116,9 @@ export const HOW_HTML = `
   <p>Die Punkte stammen aus der Original-App: Wind, Wind zur Küste, Welle, Wassertemperatur, Strömungsstärke und -richtung sowie die Strömungskante (Unterschied an 5 Punkten rund um den Spot). Die Strömung kommt aus denselben Daten wie die Karte.</p>
   <h4>5 · Schutzgebiete</h4>
   <p>Die amtlichen Flächen der Länsstyrelsen werden bei jedem Laden aufgefrischt. Mit GPS warnt die App, wenn du in einem Schutzgebiet stehst. Rechtlich maßgeblich bleibt die Vorschrift.</p>
-  <h4>6 · Die Münze</h4>
+  <h4>6 · Tag planen & Tagebuch</h4>
+  <p><b>🗓 Tag planen</b> baut aus Prognose, vorberechneten Fahr-/Fußwegen (OpenStreetMap-Routing) und Schutzgebieten einen Tagesplan; eigene Spots lassen sich an jeder Stelle fest einfügen. <b>📖 Tagebuch</b> speichert Sessions (auch ohne Fang), Bisse und Fänge nur auf dem Gerät – mit verschlüsselter Sicherungsdatei. Der Index ist eine unvalidierte Heuristik, keine Fangwahrscheinlichkeit; Prognosesicherheit, Sicherheit und Recht stehen getrennt daneben.</p>
+  <h4>7 · Die Münze</h4>
   <p>Ehrlicher Zufall (50:50 aus dem Zufallsgenerator des Geräts) zwischen den zwei besten Spots der aktuellen Stunde. Klang und Melodie werden live im Gerät erzeugt.</p>
   <h4>Grenzen</h4>
   <p>Das alles sind Modellprognosen, keine Messungen. Eine Seemeile Auflösung zeigt keine Details direkt an einzelnen Steinen. Kein Ersatz für Seekarte, Wetterwarnung oder Vorschriften.</p>`;

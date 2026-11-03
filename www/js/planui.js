@@ -82,6 +82,8 @@ export function initPlanner(ctx) {
       <div class="formRow"><label>Von<input name="from" type="datetime-local" value="${iso(from)}" required></label><label>Bis<input name="to" type="datetime-local" value="${iso(to)}" required></label></div>
       <div class="formRow"><label>Aufenthalt pro Spot<select name="stay">${[60, 90, 120, 180].map(m => `<option value="${m}" ${m === 90 ? 'selected' : ''}>${m} min</option>`).join('')}</select></label>
         <label>Max. Fußweg<select name="walk">${[15, 25, 40, 60].map(m => `<option value="${m}" ${m === 40 ? 'selected' : ''}>${m} min</option>`).join('')}</select></label></div>
+      <div class="formRow"><label>Höchstens<select name="max">${[1, 2, 3, 4, 6].map(m => `<option value="${m}" ${m === 4 ? 'selected' : ''}>${m} Spot${m > 1 ? 's' : ''}</option>`).join('')}</select></label>
+        <label class="check" style="align-self:end"><input type="checkbox" name="fav" checked> Favoriten bevorzugen</label></div>
       <label class="check"><input type="checkbox" name="less"> Weniger fahren</label>
       <button>Plan erstellen</button></form>
       <p class="note">Bis: standardmäßig Ende der Dämmerung (${hm(st.dusk ?? st.set)}). Die Vorlieben ändern nur die Planung, nie den Eignungsindex der Spots.</p>`, () => {
@@ -89,7 +91,7 @@ export function initPlanner(ctx) {
         e.preventDefault(); const fd = new FormData(e.target), sel = fd.get('start');
         const start = sel === 'gps' ? { lat: gps.lat, lon: gps.lon, label: 'Mein Standort' } : sel === 'home' ? { ...home, label: 'Ferienhaus' } : { lat: map.getCenter().lat, lon: map.getCenter().lng, label: 'Kartenmitte' };
         const params = { start, from: Math.max(f0, new Date(fd.get('from')).getTime()), to: Math.min(f1, new Date(fd.get('to')).getTime()),
-          prefs: { stayMin: +fd.get('stay'), maxWalkMin: +fd.get('walk'), lessDriving: fd.get('less') === 'on' } };
+          prefs: { stayMin: +fd.get('stay'), maxWalkMin: +fd.get('walk'), lessDriving: fd.get('less') === 'on', maxStops: +fd.get('max'), favorites: fd.get('fav') === 'on' ? ctx.favorites() : [] } };
         if (params.to <= params.from) return ctx.toast('Ende muss nach dem Beginn liegen (innerhalb der Prognose)');
         ctx.sheet('plan', '🗓 Angeltag planen', '<p class="note">Rechne … (Fahrzeiten vom Start werden online abgefragt)</p>');
         state = { params, manual: [], excluded: [], done: [], startTable: await liveStartTable(start), createdAt: Date.now() };
@@ -127,7 +129,7 @@ export function initPlanner(ctx) {
           <a href="https://www.google.com/maps/dir/?api=1&destination=${pos(s.node).lat},${pos(s.node).lon}" target="_blank" rel="noopener">🚗 Navigation</a>
           ${s.origin === 'manual' ? `<button data-up="${s.stopId}" class="secondary">↑</button><button data-down="${s.stopId}" class="secondary">↓</button><button data-unpin="${s.stopId}" class="secondary">Fixierung lösen</button>`
             : `<button data-pin="${s.stopId}" class="secondary">📌 Fixieren</button>`}
-          <button data-stay="${s.stopId}" class="secondary">⏱ Aufenthalt</button><button data-del="${s.stopId}" class="secondary">✕</button></div>`}
+          ${s.waypointOnly ? '' : `<button data-sess="${s.stopId}" class="secondary">▶ Session</button>`}<button data-stay="${s.stopId}" class="secondary">⏱ Aufenthalt</button><button data-del="${s.stopId}" class="secondary">✕</button></div>`}
       </div>`;
     };
     ctx.sheet('plan', `🗓 ${dayLabel(state.params.from)}`, `
@@ -137,7 +139,7 @@ export function initPlanner(ctx) {
       ${P.conflicts.filter(c => c.options).map(c => `<p class="warn">⚠ ${esc(c.text)}<br><small>Möglich: ${c.options.map(esc).join(' · ')}</small></p>`).join('')}
       <p class="note">Start: ${esc(state.params.start.label)} · Zeiten in Gotland-Ortszeit</p>
       ${ins(0)}${stops.map((s, i) => stopHtml(s, i) + ins(i + 1)).join('')}
-      <div class="menu"><button id="pReplan">↻ Restlichen Angeltag neu planen</button><button id="pNew" class="secondary">Neuen Plan erstellen</button><button id="pClear" class="secondary">Plan verwerfen</button></div>
+      <div class="menu"><button id="pReplan">↻ Restlichen Angeltag neu planen</button><button id="pDiary" class="secondary">📖 Plan ins Tagebuch übernehmen</button><button id="pNew" class="secondary">Neuen Plan erstellen</button><button id="pClear" class="secondary">Plan verwerfen</button></div>
       <p class="note">Eignungsindex = Heuristik der Original-App (nicht validiert), keine Fangwahrscheinlichkeit. Planungsqualität bewertet nur Zeiten, Wege und Daten.</p>`, bind);
   }
   const why = s => {
@@ -170,6 +172,8 @@ export function initPlanner(ctx) {
       state.params.from = Math.max(state.params.from, Date.now()); recompute(); ctx.toast('Restplan neu berechnet');
     };
     $('pNew').onclick = openForm;
+    $('pDiary').onclick = async () => { const n = await ctx.diary().fromPlan(state.plan.stops, state.createdAt); ctx.toast(`${n} geplante Session(s) im Tagebuch – dort „Jetzt angefangen“ oder „Nicht gemacht“`); ctx.diary().open(); };
+    B('[data-sess]').forEach(b => b.onclick = () => ctx.diary().startFromStop(find(b.dataset.sess)));
     $('pClear').onclick = async () => { if (!confirm('Plan verwerfen?')) return; state = null; layer.clearLayers(); await ctx.store.save('plan', null); ctx.closeSheet(); };
   }
   function move(stopId, dir) {

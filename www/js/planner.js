@@ -22,7 +22,8 @@ const MIN = 60000;
  *  done: stops already completed (kept as they are, planning starts after them)
  */
 export function planDay(p) {
-  const pr = { stayMin: 90, minStayMin: 45, setupMin: 10, bufferMin: 10, lessDriving: false, maxWalkMin: 40, ...p.prefs };
+  const pr = { stayMin: 90, minStayMin: 45, setupMin: 10, bufferMin: 10, lessDriving: false, maxWalkMin: 40, maxStops: 6, favorites: [], ...p.prefs };
+  const fav = new Set((pr.favorites || []).map(String));
   const lambda = pr.lessDriving ? 0.9 : 0.35;
   const manual = p.manual || [];
   const value = (spotId, a, b) => {  // index-weighted fishing hours in [a,b]
@@ -53,9 +54,9 @@ export function planDay(p) {
   };
 
   // fill the time between (t, node) and a deadline with automatic stops (beam search)
-  const fillGap = (t0, node0, deadline, nextLeg, used) => {
+  const fillGap = (t0, node0, deadline, nextLeg, used, room = 6) => {
     let beam = [{ t: t0, node: node0, stops: [], v: 0 }], best = beam[0];
-    for (let depth = 0; depth < 6; depth++) {
+    for (let depth = 0; depth < Math.min(6, room); depth++) {
       const next = [];
       for (const st of beam) for (const s of p.spots) {
         if (used.has(s.id) || st.stops.some(x => x.spotId === s.id)) continue;
@@ -66,7 +67,7 @@ export function planDay(p) {
           if (stop.depart + pr.bufferMin * MIN > deadline) continue;
           const tail = nextLeg ? nextLeg(stop.depart, stop.node) : 0;   // must still reach the next fixed stop / day end
           if (tail == null || stop.depart + tail * MIN > deadline) continue;
-          const v = st.v + stop.value - lambda * stop.driveMin / 60 - 0.1 * stop.walkMin / 60;
+          const v = st.v + stop.value - lambda * stop.driveMin / 60 - 0.1 * stop.walkMin / 60 + (fav.has(String(s.id)) ? 0.3 : 0);
           next.push({ t: stop.depart, node: stop.node, stops: [...st.stops, stop], v });
         }
       }
@@ -92,14 +93,14 @@ export function planDay(p) {
       if (!direct) { plan.conflicts.push({ type: 'route', stopId: m.stopId, text: `Keine Route zu ${name(p, m.spotId)} – Zeiten nicht berechenbar` }); continue; }
       const slack = (m.preferredStart ? m.preferredStart - direct.fishFrom : 0);
       if (slack > pr.stayMin * MIN) {
-        const gap = fillGap(t, node, m.preferredStart, (dep, nd) => { const l = legStart(dep, nd, m.spotId); return l ? Math.ceil(l.d.min) + l.walk + pr.setupMin : null; }, new Set([...used, ...manual.map(x => x.spotId)]));
+        const gap = fillGap(t, node, m.preferredStart, (dep, nd) => { const l = legStart(dep, nd, m.spotId); return l ? Math.ceil(l.d.min) + l.walk + pr.setupMin : null; }, new Set([...used, ...manual.map(x => x.spotId)]), pr.maxStops - plan.stops.length - (remainingManual.length - i));
         for (const s of gap) { plan.stops.push(s); used.add(s.spotId); t = s.depart; node = s.node; }
       }
       const stop = makeStop(t, node, m.spotId, 'manual', m.stayMin || pr.stayMin, m);
       if (!stop.fishable) stop.waypointOnly = true;   // banned / dangerous: shown, but not as a fishing stop
       plan.stops.push(stop); used.add(m.spotId); t = stop.depart; node = stop.node;
     } else {
-      const gap = fillGap(t, node, p.to, null, new Set([...used, ...manual.map(x => x.spotId)]));
+      const gap = fillGap(t, node, p.to, null, new Set([...used, ...manual.map(x => x.spotId)]), pr.maxStops - plan.stops.length);
       for (const s of gap) { plan.stops.push(s); used.add(s.spotId); t = s.depart; node = s.node; }
     }
   }
