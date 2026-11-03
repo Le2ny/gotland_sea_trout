@@ -8,6 +8,8 @@ import { coastIndex, computeBarriers } from './geo.js';
 import { fetchProtection, protectionAt, RULES_URL, HVMFS_URL, SEASON_NOTE } from './protection.js';
 import * as store from './store.js';
 import { initIntro, HOW_HTML } from './intro.js';
+import { assess, bestWindows, fishable, MODEL_VERSION, STOCKHOLM, CATCH_RULES } from './assess.js';
+import { initPlanner } from './planui.js';
 
 const $ = id => document.getElementById(id);
 const H = 3600000;
@@ -17,8 +19,9 @@ const H = 3600000;
 if ('serviceWorker' in navigator && !window.Capacitor?.isNativePlatform?.() && (location.protocol === 'https:' || location.hostname === 'localhost'))
   navigator.serviceWorker.register('sw.js').catch(e => console.warn('Service Worker:', e.message));
 
-const fmtTime = ms => new Date(ms).toLocaleString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-const fmtHour = ms => new Date(ms).toLocaleString('de-DE', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const fmtTime = ms => new Date(ms).toLocaleString('de-DE', { timeZone: 'Europe/Stockholm', weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+const fmtHour = ms => new Date(ms).toLocaleString('de-DE', { timeZone: 'Europe/Stockholm', weekday: 'short', hour: '2-digit', minute: '2-digit' });
+const hhmm = ms => new Date(ms).toLocaleTimeString('de-DE', { timeZone: 'Europe/Stockholm', hour: '2-digit', minute: '2-digit' });
 const fmtNum = (x, d = 2) => x.toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const cls = sc => sc >= 75 ? 'b-good' : sc >= 60 ? 'b-mid' : 'b-low';
@@ -28,6 +31,7 @@ const km = m => m < 1000 ? `${Math.round(m)} m` : `${fmtNum(m / 1000, 1)} km`;
 
 const [palette, coast, bundledBarriers, builtinSpots, parking, bundledProtection] = await Promise.all(
   ['palette', 'coast', 'barriers', 'spots', 'parking', 'protection'].map(n => fetch(`data/${n}.json`).then(r => r.json())));
+const routes = await fetch('data/routes.json').then(r => r.json()).catch(() => ({ nodes: [], spots: {}, car: { durMin: [], distKm: [] } }));
 let coastIx = null; const ix = () => (coastIx ??= coastIndex(coast));
 
 // ---------------------------------------------------------------- layers & colour scales
@@ -66,8 +70,29 @@ window.__map = map; window.__field = field; // for tests
 
 // ---------------------------------------------------------------- state
 let ocean = null, weather = null, hour = 0, S = {}, ranking = [], protection = bundledProtection, customSpots = [], home = null, newer = null;
-let settings = { sound: true, main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
+let settings = { sound: true, satOnly: false, marker: 'rank', filter: 'all', main: 'current', spots: true, custom: true, parking: false, protection: true, bathy: false, satellite: false, turbDays: 3 };
 const allSpots = () => [...builtinSpots, ...customSpots];
+
+const qCache = new Map();
+function assessHour(k) {
+  if (!qCache.has(k)) {
+    const ms = ocean.times[k];
+    const rs = rankAll(allSpots(), S.current, k, getWeather);
+    qCache.set(k, new Map(rs.map(r => [String(r.spot.id), { ...assess(r, { ms, protection, leadH: (ms - ocean.fetchedAt) / H, ageH: (Date.now() - ocean.fetchedAt) / H }), r }])));
+  }
+  return qCache.get(k);
+}
+function quality(spotId, ms) {
+  if (!ocean) return null;
+  const k = Math.floor((ms - ocean.times[0]) / H); if (k < 0 || k >= ocean.times.length) return null;
+  const a = assessHour(k).get(String(spotId)); if (!a) return null;
+  return { ...a, fishable: fishable(a) };
+}
+function windows48(spotId) {
+  const k0 = Math.max(0, Math.floor((Date.now() - ocean.times[0]) / H)), k1 = Math.min(ocean.times.length - 1, k0 + 47), series = [];
+  for (let k = k0; k <= k1; k++) { const a = assessHour(k).get(String(spotId)); if (a) series.push({ k, t: ocean.times[k], index: a.index, ok: fishable(a) }); }
+  return bestWindows(series, 3);
+}
 
 async function barriersFor(grid) {
   if (barriersMatch(bundledBarriers, grid)) return bundledBarriers;
@@ -82,7 +107,7 @@ async function barriersFor(grid) {
 }
 
 async function show(o, w) {
-  ocean = o;
+  ocean = o; qCache.clear();
   weather = w && w.times?.[0] === o.times[0] && w.times.length === o.times.length ? w : null;
   const bCur = await barriersFor(o.grid);
   const bTemp = gridKey(o.temp.grid) === gridKey(o.grid) ? bCur : await barriersFor(o.temp.grid);
@@ -148,7 +173,7 @@ function update() {
   if (!ocean) return;
   $('timeLabel').textContent = fmtTime(ocean.times[hour]);
   updateStatus();
-  field.setSpec(fieldSpec());
+  field.setSpec(settings.satOnly ? null : fieldSpec());
   drawLegend();
   ranking = rankAll(allSpots(), S.current, hour, getWeather);
   drawSpots();
@@ -176,11 +201,15 @@ const toggle = (layer, on) => on ? layer.addTo(map) : layer.remove();
 function drawSpots() {
   spotLayer.clearLayers(); customLayer.clearLayers();
   const rs = ranking.length ? ranking : allSpots().map(s => ({ spot: s, score: null }));
-  for (const r of rs) {
+  const A = ocean ? assessHour(hour) : null;
+  rs.forEach((r, i) => {
     const custom = String(r.spot.id).startsWith('c');
-    L.marker([r.spot.lat, r.spot.lon], { icon: badge(r.score ?? '–', r.score == null ? 'b-low' : cls(r.score), custom ? 'custom' : ''), title: r.spot.name, zIndexOffset: r.score ?? 0 })
+    if (settings.filter === 'builtin' && custom || settings.filter === 'custom' && !custom) return;
+    const a = A?.get(String(r.spot.id)), banned = a && !a.legal.fishable, danger = a?.safety.level === 'gefahr';
+    const txt = r.score == null ? '–' : banned ? '⛔' : settings.marker === 'rank' ? i + 1 : r.score;
+    L.marker([r.spot.lat, r.spot.lon], { icon: badge(txt, r.score == null || banned ? 'b-low' : cls(r.score), (custom ? 'custom' : '') + (danger ? ' danger' : '')), title: r.spot.name, zIndexOffset: banned ? -100 : (r.score ?? 0) })
       .on('click', () => openSpot(r.spot.id)).addTo(custom ? customLayer : spotLayer);
-  }
+  });
   toggle(spotLayer, settings.spots); toggle(customLayer, settings.custom);
 }
 
@@ -214,6 +243,8 @@ function drawProtection() {
 
 const turbDate = () => new Date(Date.now() - settings.turbDays * 86400000).toISOString().slice(0, 10);
 function applyOverlays() {
+  if (settings.satOnly) { osm.remove(); satellite.addTo(map); bathy.remove(); turbidity?.remove(); turbidity = null; field.setSpec(null); protLayer.remove(); parkLayer.remove(); $('legend').hidden = true; $('btnSat').classList.add('on'); return; }
+  $('legend').hidden = false; $('btnSat')?.classList.remove('on');
   if (settings.satellite) { osm.remove(); satellite.addTo(map); } else { satellite.remove(); osm.addTo(map); }
   toggle(bathy, settings.bathy);
   turbidity?.remove(); turbidity = null;
@@ -292,14 +323,26 @@ function openSpot(id) {
   if (s.note) facts += row('Notiz', esc(s.note));
   facts += row('Küste schaut', `nach ${compass(s.facing)} (${s.facing}°)`);
   if (home) facts += row('Vom Haus', km(hav([home.lat, home.lon], [s.lat, s.lon])) + ' Luftlinie');
-  const prot = protectionNear(s);
-  const protTxt = prot ? `<p class="warn">⚠ ${prot.inside ? 'Liegt im' : 'Nahe am'} Schutzgebiet „${esc(prot.f.properties.name)}“. ${SEASON_NOTE}</p>`
-    : s.protected ? `<p class="note">⚠ Bach-/Flussmündung in der Nähe (${esc(s.protected)}): Schonbereiche und -zeiten beachten.</p>` : '';
-  const btns = `<div class="sheetBtns"><a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Navigation</a>
+  const a = ocean ? assessHour(hour).get(String(s.id)) : null;
+  let protTxt = '';
+  if (a) {
+    const legalCls = { verboten: 'warn', ungeprüft: 'warn', unbekannt: 'warn' }[a.legal.status] || 'note';
+    const wins = windows48(s.id);
+    protTxt = `<div class="four">
+      <div><small>Eignungsindex</small><b>${a.index}/100</b><span>${esc(MODEL_VERSION)}</span></div>
+      <div><small>Prognosesicherheit</small><b>${a.confidence.level}</b><span>${a.confidence.why.slice(0, 2).map(esc).join(' · ') || 'Daten vollständig'}</span></div>
+      <div class="${a.safety.level}"><small>Sicherheit</small><b>${{ ok: 'ok', achtung: 'Achtung', gefahr: 'Gefahr', unbekannt: 'unbekannt' }[a.safety.level]}</b><span>${a.safety.msgs.map(esc).join(' · ') || 'keine Warnung'}</span></div>
+      <div class="${a.legal.status === 'verboten' ? 'gefahr' : ''}"><small>Recht</small><b>${{ verboten: '⛔ Verbot', schutzgebiet: 'Schutzgebiet', ungeprüft: 'ungeprüft', unbekannt: 'unbekannt' }[a.legal.status] || 'kein Gebiet bekannt'}</b><span>${esc(a.legal.label)}</span></div></div>
+      <h4>Beste Zeitfenster (48 h)</h4>${wins.length ? `<div class="wins">${wins.map(w => `<button class="win" data-t="${w.from}">${fmtHour(w.from)}–${hhmm(w.to)}<b>${w.avg}</b></button>`).join('')}</div>` : '<p class="note">Kein befischbares Zeitfenster in den nächsten 48 h.</p>'}
+      <details><summary>Wie der Index zustande kommt</summary><ul class="parts">${a.parts.map(p => `<li>${esc(p.label)} <b>${p.pts > 0 ? '+' : ''}${p.pts}</b></li>`).join('')}${a.raw > 100 ? `<li>Summe ${a.raw} → auf 100 begrenzt</li>` : ''}</ul></details>`;
+  }
+  const btns = `<div class="sheetBtns"><a href="https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}" target="_blank" rel="noopener">Navigation</a><button id="spPlan" class="secondary">🗓 Zum Tagesplan</button>
     ${custom ? '<button id="spEdit" class="secondary">Bearbeiten</button><button id="spDel" class="secondary">Löschen</button>' : ''}</div>`;
   sheet('spot', `${s.name}${r ? ` · ${r.score}/100` : ''}`, `${r ? `<div class="why">${esc(r.reasons.join(' · ') || 'keine Pluspunkte')}</div>` : ''}
     <dl class="facts">${facts}</dl>${protTxt}${btns}
-    <p class="note">${ocean ? fmtTime(ocean.times[hour]) + ' · ' : ''}Spotbewertung ${s.rating}/5${custom ? ' · eigener Spot' : ''}</p>`, s.id, () => {
+    <p class="note">${ocean ? fmtTime(ocean.times[hour]) + ' · ' : ''}Spotbewertung ${s.rating}/5${custom ? ' · eigener Spot' : ''} · Index ≠ Fangwahrscheinlichkeit</p>`, s.id, () => {
+    $('spPlan').onclick = () => planner.addSpot(s.id);
+    $('sheetBody').querySelectorAll('.win').forEach(b => b.onclick = () => { setHour(Math.floor((+b.dataset.t - ocean.times[0]) / H)); });
     if (!custom) return;
     $('spEdit').onclick = () => editCustom(s);
     $('spDel').onclick = async () => { if (!confirm(`„${s.name}“ löschen?`)) return; customSpots = customSpots.filter(x => x.id !== s.id); await saveCustom(); $('sheet').hidden = true; };
@@ -336,7 +379,7 @@ function editCustom(s) {
     };
   });
 }
-async function saveCustom() { await store.save('custom', customSpots); if (ocean) update(); else drawSpots(); }
+async function saveCustom() { await store.save('custom', customSpots); qCache.clear(); if (ocean) update(); else drawSpots(); }
 
 map.on('click', async e => {
   const { lat, lng } = e.latlng;
@@ -384,12 +427,16 @@ $('btnLayers').onclick = () => {
   sheet('layers', 'Ebenen', `<h4>Karte zeigt</h4>${['current', 'wind', 'wave', 'temp', 'level', 'turbidity'].map(radio).join('')}
     <div id="turbOpts" ${settings.main === 'turbidity' ? '' : 'hidden'}><label class="opt">Satellitenbild vom <select id="turbDays">${[1, 2, 3, 4, 5, 6, 7, 10, 14].map(d => `<option value="${d}" ${d === settings.turbDays ? 'selected' : ''}>${new Date(Date.now() - d * 86400000).toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit' })}</option>`).join('')}</select></label>
     <p class="note">Sentinel-2, nur bei wolkenfreiem Himmel; leer = keine Messung. Braucht Internet (angesehene Kacheln bleiben gespeichert).</p></div>
+    <h4>Spots</h4><label class="opt">Marker zeigen <select id="mkMode"><option value="rank" ${settings.marker === 'rank' ? 'selected' : ''}>Rang</option><option value="index" ${settings.marker === 'index' ? 'selected' : ''}>Eignungsindex</option></select></label>
+    <label class="opt">Welche <select id="mkFilter"><option value="all" ${settings.filter === 'all' ? 'selected' : ''}>Alle</option><option value="builtin" ${settings.filter === 'builtin' ? 'selected' : ''}>Vordefiniert</option><option value="custom" ${settings.filter === 'custom' ? 'selected' : ''}>Eigene</option></select></label>
     <h4>Dazu</h4>${check('spots', 'Spots')}${check('custom', 'Eigene Spots')}${check('protection', 'Schutzgebiete (amtlich)', `Stand ${new Date(protection.fetchedAt).toLocaleDateString('de-DE')}`)}${check('parking', 'Parkplätze nahe der Küste', 'ab Zoom 11')}
     ${check('bathy', 'Wassertiefe (EMODnet)', 'braucht Internet')}${check('satellite', 'Satellitenkarte', 'braucht Internet')}
     <p class="note">Strömung, Wasserstand, Wassertemperatur, Wind und Welle funktionieren nach „Prognose laden“ offline.</p>`, null, () => {
     $('sheetBody').querySelectorAll('input[name=main]').forEach(i => i.onchange = () => { settings.main = i.value; $('turbOpts').hidden = i.value !== 'turbidity'; saveSettings(); });
     $('sheetBody').querySelectorAll('input[data-k]').forEach(i => i.onchange = () => { settings[i.dataset.k] = i.checked; saveSettings(); });
     $('turbDays').onchange = e => { settings.turbDays = +e.target.value; saveSettings(); };
+    $('mkMode').onchange = e => { settings.marker = e.target.value; saveSettings(); drawSpots(); };
+    $('mkFilter').onchange = e => { settings.filter = e.target.value; saveSettings(); drawSpots(); };
   });
 };
 function saveSettings() { store.save('settings', settings).catch(() => {}); applyOverlays(); }
@@ -462,6 +509,20 @@ function openSources() {
   <li><b>Spots & Bewertung:</b> Gotland Sea Trout v6.2.4 (Omssen)</li></ul>
   <p class="note">Modellprognosen, keine Messungen. Kein Ersatz für Seekarte, Wetterwarnung oder geltende Vorschriften.</p>`);
 }
+
+// ---------------------------------------------------------------- day planner (PLAN-01 … 09)
+let lastFix = null;
+const planner = initPlanner({ L, map, $, esc, store, routes,
+  sheet: (mode, title, html, a, b) => sheet(mode, title, html, null, typeof a === 'function' ? a : b),
+  closeSheet: () => { $('sheet').hidden = true; }, toast: msg => { $('status').textContent = msg; },
+  spots: () => allSpots(), quality, hasForecast: () => !!ocean, forecastRange: () => [ocean.times[0], ocean.times.at(-1)],
+  home: () => home,
+  fix: () => new Promise(res => { if (lastFix && Date.now() - lastFix.t < 120000) return res(lastFix);
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition(p => { lastFix = { lat: p.coords.latitude, lon: p.coords.longitude, t: Date.now() }; res(lastFix); }, () => res(null), { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }); }) });
+$('btnPlan').onclick = () => planner.hasPlan() ? planner.showPlan() : planner.openForm();
+$('btnSat').onclick = () => { settings.satOnly = !settings.satOnly; saveSettings(); if (!settings.satOnly) update(); };
+window.__planner = planner;
 
 // ---------------------------------------------------------------- timeline
 function setHour(k) { hour = k; $('slider').value = k; update(); }

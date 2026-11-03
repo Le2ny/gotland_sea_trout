@@ -11,21 +11,25 @@ export function exposure(s, d) {
 }
 
 // --- original scoring (unchanged logic)
+export const MODEL_VERSION = 'GST-Heuristik v6.2.4 (unverändert, nicht validiert)';
+/** original scoring, unchanged in logic; additionally returns the points per factor (parts) for transparency */
 export function scoreDetailed(w, m, s, currentCtx = null) {
-  let n = 28 + s.rating * 5, reasons = [];
-  if (w?.wind_speed_10m >= 8 && w.wind_speed_10m <= 26) { n += 10; reasons.push('brauchbarer Wind'); }
-  if (w?.wind_direction_10m != null) { const d = angleDiff(s.facing, w.wind_direction_10m); if (d <= 75) { n += 9; reasons.push('Wind zur Küste passend'); } else if (d > 150) n -= 7; }
-  if (m?.wave_height >= .2 && m.wave_height <= 1.05) { n += 10; reasons.push('passende Welle'); }
-  if (m?.sea_surface_temperature >= 4 && m.sea_surface_temperature <= 14) { n += 8; reasons.push('passende Wassertemperatur'); }
+  let n = 28 + s.rating * 5; const reasons = [], parts = [{ label: `Grundwert + Spotbewertung ${s.rating}★`, pts: n }];
+  const add = (pts, label, reason = true) => { n += pts; parts.push({ label, pts }); if (reason && pts > 0) reasons.push(label); };
+  if (w?.wind_speed_10m >= 8 && w.wind_speed_10m <= 26) add(10, 'brauchbarer Wind');
+  if (w?.wind_direction_10m != null) { const d = angleDiff(s.facing, w.wind_direction_10m); if (d <= 75) add(9, 'Wind zur Küste passend'); else if (d > 150) add(-7, 'ablandiger Wind', false); }
+  if (m?.wave_height >= .2 && m.wave_height <= 1.05) add(10, 'passende Welle');
+  if (m?.sea_surface_temperature >= 4 && m.sea_surface_temperature <= 14) add(8, 'passende Wassertemperatur');
   const cv = currentCtx?.v ?? m?.ocean_current_velocity, cd = currentCtx?.dir ?? m?.ocean_current_direction;
   if (cv != null) {
-    if (cv >= .12 && cv <= .65) { n += 13; reasons.push('leichte–mäßige Strömung'); }
-    else if (cv > .65 && cv <= .9) { n += 7; reasons.push('deutliche Strömung'); }
-    else if (cv < .05) n -= 4;
-    if (cd != null) { const rel = angleDiff(s.facing, cd); if (rel >= 50 && rel <= 130) { n += 9; reasons.push('Strömung längs/schräg zur Küste'); } else if (rel > 145) n += 3; }
-    if (currentCtx?.edge >= .06) { n += 12; reasons.push('Strömungskante im Umfeld'); }
+    if (cv >= .12 && cv <= .65) add(13, 'leichte–mäßige Strömung');
+    else if (cv > .65 && cv <= .9) add(7, 'deutliche Strömung');
+    else if (cv < .05) add(-4, 'kaum Strömung', false);
+    if (cd != null) { const rel = angleDiff(s.facing, cd); if (rel >= 50 && rel <= 130) add(9, 'Strömung längs/schräg zur Küste'); else if (rel > 145) add(3, 'Strömung auflandig', false); }
+    if (currentCtx?.edge >= .06) add(12, 'Strömungskante im Umfeld');
   }
-  return { score: Math.max(0, Math.min(100, Math.round(n))), reasons };
+  const raw = Math.round(n);
+  return { score: Math.max(0, Math.min(100, raw)), raw, reasons, parts };
 }
 
 // --- current context from the Copernicus field
